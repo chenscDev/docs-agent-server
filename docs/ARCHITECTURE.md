@@ -39,6 +39,15 @@ app/
 
 **面试要点：** 向量库只负责相似度检索；展示原文、引用对齐一律回 SQLite 的 `chunks.id`。
 
+## 2.1 二期能力（P2）
+
+| 能力 | 要点 |
+|------|------|
+| 查询改写二次检索 | 首轮 `search_docs` 空命中时服务端改写 query 再搜（仍 ≤2 次）；`usage.rewriteUsed` / `searchQueries` 可观测 |
+| 多知识库 | KB CRUD；会话 / 上传绑 `knowledgeBaseId`；端上切换 + prefs 持久化 |
+| API Token | `Authorization: Bearer`；`/health` 放行；LLM Key 仍只在服务端 |
+| 解析队列 | 进程内串行队列替代 BackgroundTasks；启动扫描 `pending|parsing|indexing` 续跑（至少一次） |
+
 ## 3. 文档状态机
 
 ```text

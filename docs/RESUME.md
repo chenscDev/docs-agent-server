@@ -9,12 +9,12 @@
 **文档问答 Agent（个人项目）**｜`2026.xx – 2026.xx`  
 *React Native（动态分包） · FastAPI · 通义千问 · FAISS · SQLite · SSE*
 
-- 设计并实现面向私有文档的问答 Agent：解析 / 切分 / Embedding / 向量检索全链路，文档状态机（pending→ready/failed）保证未就绪内容不可检索。  
-- 服务端手写 Function Calling 循环（`search_docs` / `list_documents`），经 SSE 区分工具事件与回答增量；客户端 RN 分包渲染工具轨迹、流式气泡与可点击引用。  
-- SQLite 存储 chunk 正文与会话，FAISS 按知识库隔离仅存向量与 id 映射；citations 与 chunk 主键对齐，Citation 页按需二次拉取全文，降低幻觉链接与流量。  
-- 统一错误码与 requestId/usage 落库便于排障；固定 20 题评测集做回归（关键词/拒答粗判 + 失败 Case 归因）。
+- 设计并实现面向私有文档的问答 Agent：解析 / 切分 / Embedding / 向量检索全链路，文档状态机（pending→ready/failed）保证未就绪内容不可检索；解析任务经进程内队列投递，进程重启可 recover 未完成文档。  
+- 服务端手写 Function Calling 循环（`search_docs` / `list_documents`），空检索可改写 query 二次检索；经 SSE 区分工具事件与回答增量；客户端 RN 分包渲染工具轨迹、流式气泡与可点击引用。  
+- 多知识库产品化（CRUD + 会话绑库）与薄层 Bearer 鉴权；SQLite 存 chunk 正文与会话，FAISS 按 KB 隔离；citations 与 chunk 主键对齐。  
+- 统一错误码与 requestId/usage 落库便于排障；固定 20 题评测集回归（P2-D7：**20/20** 粗判通过）。
 
-**可选加一句量化（有则写）：** 评测集 20 题粗判通过率约 x%；主路径真机演示稳定（上传→问答→引用）。
+**可选加一句量化（有则写）：** 评测集 20 题粗判通过率 100%（`eval/results/eval_20260724_110754`）；主路径真机演示稳定（上传→问答→引用）。
 
 ---
 
@@ -22,9 +22,9 @@
 
 **文档问答 Agent**｜RN 分包 + FastAPI + 千问 + FAISS  
 
-- RAG + 手写 Tool Loop，SSE 下发 tool / delta / completed。  
-- 正文与向量分离；引用 chunkId 对齐，支持拒答与 Citation 二次查询。  
-- 文档状态机 + 索引重建；requestId/usage 可观测；20 题评测回归。
+- RAG + 手写 Tool Loop，空检索改写再搜；SSE 下发 tool / delta / completed。  
+- 多 KB + Bearer 鉴权；正文与向量分离；引用 chunkId 对齐。  
+- 文档状态机 + 解析队列 recover；requestId/usage 可观测；20 题评测 20/20。
 
 ---
 
@@ -33,10 +33,10 @@
 **Document Q&A Agent (Personal)**｜`2026.xx – 2026.xx`  
 *React Native · FastAPI · Qwen · FAISS · SQLite · SSE*
 
-- Built an end-to-end private-doc Agent: parse → chunk → embed → FAISS retrieval with a document status machine so only ready docs are searchable.  
-- Implemented a server-side tool-calling loop (`search_docs`, `list_documents`) and streamed tool traces vs. answer deltas over SSE to a thin RN client.  
-- Kept chunk text in SQLite and vectors in FAISS (per knowledge base); aligned citations to chunk IDs with on-demand full-text fetch to reduce hallucinated links.  
-- Added structured error codes, requestId/usage logging, and a 20-question eval set for regression.
+- Built an end-to-end private-doc Agent: parse → chunk → embed → FAISS retrieval with a document status machine and an in-process parse queue that recovers unfinished jobs after restart.  
+- Implemented a server-side tool-calling loop (`search_docs`, `list_documents`) with optional query rewrite on empty retrieval, streaming tool traces vs. answer deltas over SSE to a thin RN client.  
+- Productized multi knowledge bases and thin Bearer API auth; kept chunk text in SQLite and vectors in FAISS (per KB); aligned citations to chunk IDs.  
+- Added structured error codes, requestId/usage logging, and a 20-question eval set (**20/20** pass on P2 regression).
 
 ---
 
@@ -53,9 +53,9 @@
 | 幻觉 | 强制检索、拒答、citations 来自 hits |
 | 上下文贵 | 历史 ≤8 条 / ~3k 字；hit 截断 |
 | 流式体验 | SSE 先 tool 再 delta；可停止（端上 Abort） |
-| 文档更新 | reparse + FAISS 重建 |
-| 排障 | requestId + toolTrace + usage |
-| 和生产差距 | 单机 FAISS、无队列、无多租户——并说演进 |
+| 文档更新 | reparse + FAISS 重建；解析队列重启可续跑 |
+| 排障 | requestId + toolTrace + usage（含 rewriteUsed） |
+| 和生产差距 | 单机 FAISS、进程内队列非分布式、无多租户——并说演进 |
 
 ---
 

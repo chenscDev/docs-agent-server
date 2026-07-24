@@ -78,10 +78,10 @@
 
 ## P2-D7｜联调、评测回归、叙事（缓冲）
 
-- 跑 `scripts/run_eval.py`，失败记 `FAILURE_CASES`  
-- 更新 `ARCHITECTURE` / `RESUME` 二期 bullet  
-- 演示脚本加一句：「空检索会改写再搜」  
-- 可选：Settings 页只读展示当前模型名（不做热切换也行）
+- ~~跑 `scripts/run_eval.py`，失败记 `FAILURE_CASES`~~ → **20/20**（`eval_20260724_110754`）  
+- ~~更新 `ARCHITECTURE` / `RESUME` 二期 bullet~~  
+- ~~演示脚本加一句：「空检索会改写再搜」~~  
+- ~~可选：Settings 页只读展示当前模型名~~ → 已有（`GET /v1/meta`）
 
 ---
 
@@ -102,4 +102,4 @@
 | P2-D2～D3 多知识库 | **已完成**（CRUD + 切换 + prefs 持久化 + Settings） |
 | P2-D4 鉴权 | **已完成**（`API_TOKEN` + Bearer；`/health` 放行；RN Settings） |
 | P2-D5～D6 队列 | **已完成**（进程内串行队列 + 启动 recover；至少一次） |
-| P2-D7 回归叙事 | 待开始 |
+| P2-D7 回归叙事 | **已完成**（eval 20/20；ARCHITECTURE/RESUME/DEMO 已更新） |

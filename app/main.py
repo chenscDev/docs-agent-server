@@ -41,8 +41,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="docs-agent-server",
-    description="文档问答 Agent 后端（P2：多知识库 / Token / 解析队列）",
-    version="0.9.3",
+    description="文档问答 Agent 后端（P2 完成：改写 / 多 KB / Token / 解析队列）",
+    version="0.10.0",
     lifespan=lifespan,
 )
 

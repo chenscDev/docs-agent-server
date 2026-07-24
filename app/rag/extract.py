@@ -80,7 +80,14 @@ def _extract_plain_text(file_path: Path) -> str:
 
 def _extract_pdf(file_path: Path) -> str:
     """使用 PyMuPDF 提取 PDF 文本，处理加密 / 空页 / 页数上限。"""
-    import fitz  # pymupdf
+    try:
+        import fitz  # pymupdf
+    except ModuleNotFoundError as exc:
+        raise ExtractError(
+            "PARSE_DEPENDENCY",
+            "缺少 PyMuPDF（import fitz 失败）。请用仓库 .venv 启动服务："
+            ".venv/bin/pip install -r requirements.txt",
+        ) from exc
 
     with fitz.open(file_path) as doc:
         if doc.is_encrypted:
