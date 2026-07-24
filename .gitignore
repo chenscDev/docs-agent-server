@@ -1,0 +1,23 @@
+# 密钥与本地环境
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本地数据（上传文件、SQLite、FAISS）
+data/
+*.db
+*.sqlite3
+
+# 评测运行产物（语料与题库保留入库）
+eval/results/
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store

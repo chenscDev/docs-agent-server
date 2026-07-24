@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "corpusFile": "corpus/acme_handbook.md",
+  "corpusTitle": "ACME 科技员工手册（评测语料）",
+  "kbId": "kb_default",
+  "notes": "expectMust 全部出现（子串）才算 pass；expectAny 命中其一即可；refuse=true 时答案应体现拒答/未找到，且不应含 forbidden。人工可改 verdict。",
+  "questions": [
+    {
+      "id": "Q01",
+      "category": "fact",
+      "question": "试用期是多久？",
+      "expectAny": ["3 个月", "3个月", "三个月"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q02",
+      "category": "fact",
+      "question": "试用期工资怎么算？",
+      "expectMust": ["80%"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q03",
+      "category": "fact",
+      "question": "标准上班时间是几点到几点？",
+      "expectMust": ["10:00", "19:00"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q04",
+      "category": "fact",
+      "question": "年假要提前多久申请？",
+      "expectAny": ["3 个工作日", "三个工作日", "提前 3"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q05",
+      "category": "fact",
+      "question": "入职满三年有多少天年假？",
+      "expectMust": ["10"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q06",
+      "category": "paraphrase",
+      "question": "我想请事假，规则是什么？",
+      "expectAny": ["无薪", "提前 1", "不超过 3"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q07",
+      "category": "fact",
+      "question": "一线城市出差住宿一晚最多报多少？",
+      "expectMust": ["600"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q08",
+      "category": "fact",
+      "question": "出差餐补每天多少？要不要发票？",
+      "expectMust": ["100"],
+      "expectAny": ["无需发票", "不用发票", "不需要发票"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q09",
+      "category": "fact",
+      "question": "每周最多可以申请几天远程办公？",
+      "expectMust": ["2"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q10",
+      "category": "fact",
+      "question": "哪些会议不能远程参加？",
+      "expectAny": ["周一站会", "周五复盘"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q11",
+      "category": "fact",
+      "question": "发现钓鱼邮件应该怎么处理？",
+      "expectMust": ["security@acme.example"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q12",
+      "category": "fact",
+      "question": "申请生产环境账号需要谁审批？",
+      "expectAny": ["直属上级", "安全组"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q13",
+      "category": "fact",
+      "question": "OA 系统的入口地址是什么？",
+      "expectMust": ["https://oa.acme.example"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q14",
+      "category": "fact",
+      "question": "IT 支持邮箱是什么？服务时间？",
+      "expectMust": ["it-help@acme.example"],
+      "expectAny": ["10:00", "18:00"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q15",
+      "category": "multi",
+      "question": "报销有什么时限要求？",
+      "expectAny": ["30 天", "次月 5"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q16",
+      "category": "refuse",
+      "question": "明天北京天气怎么样？",
+      "refuse": true,
+      "forbidden": ["晴", "雨", "气温", "℃", "摄氏"],
+      "expectAny": ["未找到", "没有找到", "无法根据", "知识库"]
+    },
+    {
+      "id": "Q17",
+      "category": "refuse",
+      "question": "公司股票代码是多少？明年会不会上市？",
+      "refuse": true,
+      "forbidden": ["上市", "股票代码", "纳斯达克", "港股"],
+      "expectAny": ["未找到", "没有找到", "无法根据", "知识库"]
+    },
+    {
+      "id": "Q18",
+      "category": "refuse",
+      "question": "产假一共有多少天？",
+      "refuse": true,
+      "forbidden": ["158", "98", "产假工资"],
+      "expectAny": ["未找到", "没有找到", "无法根据", "知识库", "未提及"]
+    },
+    {
+      "id": "Q19",
+      "category": "edge",
+      "question": "迟到多久算一次迟到？一个月迟到几次会扣假？",
+      "expectMust": ["15"],
+      "expectAny": ["3 次", "三次"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q20",
+      "category": "edge",
+      "question": "市内打车报销单次上限是多少？",
+      "expectMust": ["80"],
+      "expectCitations": true,
+      "refuse": false
+    }
+  ]
+}
