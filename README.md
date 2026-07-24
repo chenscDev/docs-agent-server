@@ -136,6 +136,3 @@ data/          # 本地 DB / 上传 / FAISS（不入库）
 - 宿主需能转发 Activity Result，否则系统选文件无回调
 - 点「停止」会先调 cancel 再断开 SSE
 
-## 排期收尾
-
-主路径 D1～D18 与缓冲 D19～D20 文档/cancel 已齐。你本地剩余动作：录演示视频、按 `INTERVIEW_QA.md` 不看稿过一遍、把简历初稿填上真实时间。
