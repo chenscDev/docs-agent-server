@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.config import get_settings
+
 _CITE_RE = re.compile(r"\[(\d+)\]")
 
 
@@ -22,12 +24,18 @@ def _hit_to_citation(n: int, h: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_citations(answer: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_citations(
+    answer: str,
+    hits: list[dict[str, Any]],
+    *,
+    fallback_top3: bool | None = None,
+) -> list[dict[str, Any]]:
     """
     根据答案中的 [n] 与 hits（含 index）生成 citations。
 
     无效序号丢弃；snippet 截断约 120 字。
-    若正文未写 [n] 但有检索命中：回退附上前 3 条，保证端上可点开原文。
+    默认（P3-D2）：正文未写合法 [n] 时不返回引用，避免假 citation。
+    可将 CITATION_FALLBACK_TOP3=true 或传 fallback_top3=True 恢复演示回退。
     """
     if not hits:
         return []
@@ -41,8 +49,16 @@ def build_citations(answer: str, hits: list[dict[str, Any]]) -> list[dict[str, A
                 used.append(n)
 
     if not used:
-        # 模型偶发不写 [n]：仍返回命中，方便演示引用跳转
-        used = [int(h["index"]) for h in hits[:3] if "index" in h]
+        allow_fallback = (
+            get_settings().citation_fallback_top3
+            if fallback_top3 is None
+            else fallback_top3
+        )
+        if allow_fallback:
+            # 演示开关：模型未写 [n] 时仍挂前 3 条
+            used = [int(h["index"]) for h in hits[:3] if "index" in h]
+        else:
+            return []
 
     citations: list[dict[str, Any]] = []
     for n in used:

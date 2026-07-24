@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import Document
-from app.rag.faiss_store import search_kb
+from app.rag.retrieve import retrieve_for_query
 
 # OpenAI 兼容 tools schema
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
@@ -81,7 +81,7 @@ def execute_tool(
             summary = {"query": "", "hitCount": 0, "documents": []}
             return result, summary, None
 
-        raw = search_kb(db, kb_id, query, top_k=top_k)
+        raw, rerank_used = retrieve_for_query(db, kb_id, query, top_k=top_k)
         hits: list[dict[str, Any]] = []
         for i, h in enumerate(raw, start=1):
             hits.append(
@@ -101,6 +101,7 @@ def execute_tool(
             "ok": True,
             "query": query,
             "totalHits": len(hits),
+            "rerankUsed": rerank_used,
             "hits": [
                 {
                     "chunkId": h["chunk_id"],
@@ -122,6 +123,7 @@ def execute_tool(
         summary = {
             "query": query,
             "hitCount": len(hits),
+            "rerankUsed": rerank_used,
             "documents": sorted(
                 {h["document_title"] for h in hits if h["document_title"]}
             ),

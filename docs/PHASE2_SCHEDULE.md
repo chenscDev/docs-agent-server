@@ -103,3 +103,7 @@
 | P2-D4 鉴权 | **已完成**（`API_TOKEN` + Bearer；`/health` 放行；RN Settings） |
 | P2-D5～D6 队列 | **已完成**（进程内串行队列 + 启动 recover；至少一次） |
 | P2-D7 回归叙事 | **已完成**（eval 20/20；ARCHITECTURE/RESUME/DEMO 已更新） |
+
+---
+
+下一期见 [PHASE3_SCHEDULE.md](./PHASE3_SCHEDULE.md)（P0～P2 全做，含原二选一：切分+docx、RQ+增量）。

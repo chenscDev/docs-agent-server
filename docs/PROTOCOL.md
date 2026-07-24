@@ -120,6 +120,7 @@ HTTP 4xx/5xx 的 `detail`（以及部分包装）为：
     "searchCalls": 1,
     "searchQueries": ["试用期是多久"],
     "rewriteUsed": false,
+    "rerankUsed": true,
     "toolCallCount": 1,
     "citationCount": 1,
     "completionChars": 80

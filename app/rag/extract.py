@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 # 允许的扩展名（小写）
-ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown"}
+ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
 
 MIME_BY_EXT = {
     ".pdf": "application/pdf",
     ".txt": "text/plain",
     ".md": "text/markdown",
     ".markdown": "text/markdown",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 # 演示/练手期 PDF 页数上限（过大易拖垮本机 embedding）
@@ -54,6 +55,8 @@ def extract_text(file_path: Path, filename: str) -> str:
     try:
         if ext == ".pdf":
             text = _extract_pdf(file_path)
+        elif ext == ".docx":
+            text = _extract_docx(file_path)
         else:
             text = _extract_plain_text(file_path)
     except ExtractError:
@@ -76,6 +79,34 @@ def _extract_plain_text(file_path: Path) -> str:
     if b"\x00" in raw[:4096]:
         raise ExtractError("PARSE_BINARY", "文本文件疑似二进制，无法按 UTF-8 解析")
     return raw.decode("utf-8", errors="ignore")
+
+
+def _extract_docx(file_path: Path) -> str:
+    """抽取 docx 段落与表格文本。"""
+    try:
+        from docx import Document as DocxDocument
+    except ModuleNotFoundError as exc:
+        raise ExtractError(
+            "PARSE_DEPENDENCY",
+            "缺少 python-docx。请执行: .venv/bin/pip install python-docx",
+        ) from exc
+
+    doc = DocxDocument(str(file_path))
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        line = (para.text or "").strip()
+        if line:
+            parts.append(line)
+
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [(c.text or "").strip() for c in row.cells]
+            # 去空单元格后用制表符拼接，保留表结构信息
+            line = "\t".join(c for c in cells if c)
+            if line:
+                parts.append(line)
+
+    return "\n".join(parts)
 
 
 def _extract_pdf(file_path: Path) -> str:

@@ -151,6 +151,7 @@ def iter_agent_sse(
     search_calls = 0
     search_queries: list[str] = []
     rewrite_used = False
+    rerank_used = False
     answer = ""
     emitted_parts: list[str] = []
     t_start = time.perf_counter()
@@ -220,6 +221,8 @@ def iter_agent_sse(
                                 search_queries.append(q)
                             if hits is not None:
                                 last_hits = hits
+                            if result.get("rerankUsed"):
+                                rerank_used = True
                     else:
                         result, summary, hits = execute_tool(
                             db, session.knowledge_base_id, name, args
@@ -307,6 +310,8 @@ def iter_agent_sse(
                             dur2 = int(summary2.get("durationMs") or 0)
                             if hits2 is not None:
                                 last_hits = hits2
+                            if result2.get("rerankUsed"):
+                                rerank_used = True
                             tool_trace.append(
                                 {
                                     "toolCallId": syn_id,
@@ -414,6 +419,7 @@ def iter_agent_sse(
             "searchCalls": search_calls,
             "searchQueries": search_queries,
             "rewriteUsed": rewrite_used,
+            "rerankUsed": rerank_used,
             "toolCallCount": len(tool_trace),
             "citationCount": len(citations),
         }
@@ -438,12 +444,13 @@ def iter_agent_sse(
 
         logger.info(
             "agent_ok requestId=%s sessionId=%s latencyMs=%s searchCalls=%s "
-            "rewriteUsed=%s tools=%s citations=%s chars=%s",
+            "rewriteUsed=%s rerankUsed=%s tools=%s citations=%s chars=%s",
             request_id,
             session.id,
             latency_ms,
             search_calls,
             rewrite_used,
+            rerank_used,
             len(tool_trace),
             len(citations),
             len(answer),
@@ -481,6 +488,7 @@ def iter_agent_sse(
             "searchCalls": search_calls,
             "searchQueries": search_queries,
             "rewriteUsed": rewrite_used,
+            "rerankUsed": rerank_used,
             "toolCallCount": len(tool_trace),
             "citationCount": len(citations),
             "cancelled": True,

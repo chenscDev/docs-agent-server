@@ -1,0 +1,27 @@
+# docs-agent-server — systemd 单元（Ubuntu 22.04 演示用）
+#
+# 安装：
+#   sudo cp deploy/docs-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now docs-agent
+#   sudo systemctl status docs-agent
+
+[Unit]
+Description=docs-agent-server (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/docs-agent-server
+Environment=PATH=/opt/docs-agent-server/.venv/bin:/usr/bin
+EnvironmentFile=/opt/docs-agent-server/.env
+ExecStart=/opt/docs-agent-server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=on-failure
+RestartSec=5
+# 2G 机器避免无节制吃内存
+MemoryMax=1500M
+
+[Install]
+WantedBy=multi-user.target

@@ -9,18 +9,18 @@
 | 无服务端 cancel 接口 | 停止生成靠端上断开 SSE | **已补** `POST /v1/chat/cancel`；阻塞中的单次 LLM 调用仍需返回后才停 |
 | 粘贴上传与文件上传并存 | 演示时选一条主路径即可 | 文件上传为主；粘贴作兜底 |
 | 历史抽屉与左滑删除手势曾冲突 | 松手误关抽屉 | 已改为仅蒙层 / ✕ 关闭 |
-| 扫描版 / 纯图片 PDF | `PARSE_EMPTY` | 需可提取文本的 PDF，或改 OCR（未做） |
+| 扫描版 / 纯图片 PDF | `PARSE_EMPTY` | **P3-D5 待做** OCR；当前需可提取文本的 PDF / docx |
 | 加密 PDF / 超 100 页 | 解析失败 | 明确 `errorCode`，提示用户处理文件 |
 
 ## RAG / Agent
 
 | 问题 | 影响 | 说明 |
 |------|------|------|
-| 切分固定长度 | 表格/标题边界可能切断 | `CHUNK_SIZE`/`OVERLAP` 可调；评测失败优先查切分 |
-| 无重排（rerank） | 难 query 召回不稳 | Phase1 仅向量 Top-K |
+| 切分边界 | 超长段落仍可能切断 | **P3-D3**：标题→段落→窗口；chunk 可带 `heading` |
+| 检索排序 | 难 query 召回不稳 | **P3-D1**：FAISS Top-N + 云 Rerank（失败本地启发式）；`usage.rerankUsed` |
 | `search_docs` 最多 2 次 | 复杂多跳受限 | 防成本失控；**P2-D1** 空命中会服务端改写再搜 1 次 |
-| 非流式与流式路径不完全同一套编排 | 评测默认走 `/v1/chat` | 演示主路径仍用 SSE Agent |
-| 引用 fallback | 模型忘写 `[n]` 时仍挂前 3 条 hit | 演示友好，生产宜收紧 |
+| 非流式与流式路径不完全同一套编排 | 评测默认走 `/v1/chat` | 演示主路径仍用 SSE Agent；均已接 Rerank |
+| 引用 fallback | 模型忘写 `[n]` 时曾挂前 3 条 | **P3-D2 默认关闭**；`CITATION_FALLBACK_TOP3=true` 可开 |
 
 ## 工程
 

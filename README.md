@@ -8,7 +8,7 @@
 | `rn-biz-0.86` → `src/docs-agent` | 聊天 / 知识库 / 引用 UI |
 | `rn-dynamic-0.86` | 原生宿主与分包加载 |
 
-**当前进度：二期 P2-D1～D7 全部完成**（改写 / 多 KB / Token / 解析队列 / 评测 20/20 + 叙事）。
+**当前进度：二期 P2-D1～D7 全部完成**；三期排期见 [PHASE3_SCHEDULE.md](./docs/PHASE3_SCHEDULE.md)（效果 + 产品 + 工程深度全做）。
 
 ## 这个项目解决什么问题
 
@@ -20,7 +20,10 @@
 
 | 文档 | 内容 |
 |------|------|
-| [docs/PHASE2_SCHEDULE.md](./docs/PHASE2_SCHEDULE.md) | **二期 5～7 天排期**（改写 / 多 KB / 队列+鉴权） |
+| [docs/DEPLOY_GUIDE.md](./docs/DEPLOY_GUIDE.md) | **完整部署主文档**（服务端 + Android CDN 打包/联调/更新） |
+| [docs/DEPLOY_DEMO.md](./docs/DEPLOY_DEMO.md) | 服务端摘要（指向主文档） |
+| [docs/PHASE3_SCHEDULE.md](./docs/PHASE3_SCHEDULE.md) | **三期 12～15 天排期**（Rerank / docx / RQ / FAISS 增量等） |
+| [docs/PHASE2_SCHEDULE.md](./docs/PHASE2_SCHEDULE.md) | 二期排期（已完成） |
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 分层、状态机、一次请求时序、记忆 vs 检索 |
 | [docs/DIAGRAMS.md](./docs/DIAGRAMS.md) | Mermaid 架构图（可导出 PNG） |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | HTTP / SSE / cancel 契约 |

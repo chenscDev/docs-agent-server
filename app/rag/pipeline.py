@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,6 +96,9 @@ def run_parse_job(doc_id: str) -> None:
                 raise ExtractError("PARSE_EMPTY", "切分后无有效片段")
 
             for piece in pieces:
+                meta = None
+                if piece.heading:
+                    meta = json.dumps({"heading": piece.heading}, ensure_ascii=False)
                 db.add(
                     Chunk(
                         id=new_id("chk"),
@@ -103,7 +107,7 @@ def run_parse_job(doc_id: str) -> None:
                         chunk_index=piece.index,
                         content=piece.content,
                         token_estimate=piece.token_estimate,
-                        metadata_json=None,
+                        metadata_json=meta,
                         content_hash=piece.content_hash,
                     )
                 )

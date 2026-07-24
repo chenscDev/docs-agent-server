@@ -39,6 +39,15 @@ app/
 
 **面试要点：** 向量库只负责相似度检索；展示原文、引用对齐一律回 SQLite 的 `chunks.id`。
 
+## 2.2 三期已落地（P3-D1～D4）
+
+| 能力 | 要点 |
+|------|------|
+| 检索 Rerank | FAISS 召回 `RERANK_CANDIDATE_K` → 通义 `gte-rerank-v2`；失败本地词重叠兜底；`usage.rerankUsed` |
+| 引用收紧 | 默认仅解析答案中的 `[n]`；`CITATION_FALLBACK_TOP3=true` 可恢复「无标记挂前 3」 |
+| 结构化切分 | 标题 → 段落 → 窗口；`chunks.metadata_json.heading` |
+| docx | `python-docx` 抽段落与表格；RN 上传可选 `.docx` |
+
 ## 2.1 二期能力（P2）
 
 | 能力 | 要点 |

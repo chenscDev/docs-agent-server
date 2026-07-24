@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.llm import LLMClient
 from app.db.session import DEFAULT_KB_ID, get_db
-from app.rag.faiss_store import search_kb
+from app.rag.retrieve import retrieve_for_query
 
 router = APIRouter(prefix="/debug", tags=["debug"])
 
@@ -65,7 +65,7 @@ def debug_search(body: DebugSearchRequest, db: Session = Depends(get_db)) -> dic
     用于确认 FAISS + Embedding 是否工作，不是最终 Agent 接口。
     """
     try:
-        hits = search_kb(
+        hits, rerank_used = retrieve_for_query(
             db,
             body.knowledge_base_id,
             body.query,
@@ -77,6 +77,7 @@ def debug_search(body: DebugSearchRequest, db: Session = Depends(get_db)) -> dic
     return {
         "query": body.query,
         "hitCount": len(hits),
+        "rerankUsed": rerank_used,
         "hits": [
             {
                 "chunkId": h.chunk_id,

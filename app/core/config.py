@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     faiss_dir: str = "./data/faiss"
     embedding_batch_size: int = 10
 
+    # P3-D1 检索重排
+    rerank_enabled: bool = True
+    rerank_model: str = "gte-rerank-v2"
+    rerank_candidate_k: int = 20
+    rerank_api_url: str = (
+        "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    )
+    rerank_timeout_sec: float = 20.0
+    rerank_max_doc_chars: int = 1200
+
+    # P3-D2 引用：默认不「无 [n] 仍挂前 3 条」；演示可开
+    citation_fallback_top3: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -23,7 +23,7 @@ from app.agent.prompt import (
 from app.core.ids import new_id
 from app.core.llm import LLMClient
 from app.db.models import Document, Message, Session as ChatSession
-from app.rag.faiss_store import search_kb
+from app.rag.retrieve import retrieve_for_query
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +87,11 @@ def run_rag_chat(
     db.add(user_msg)
     db.flush()
 
-    # 检索
+    # 检索（FAISS + 可选 Rerank）
     t0 = time.perf_counter()
-    raw_hits = search_kb(db, session.knowledge_base_id, user_text, top_k=top_k)
+    raw_hits, rerank_used = retrieve_for_query(
+        db, session.knowledge_base_id, user_text, top_k=top_k
+    )
     duration_ms = int((time.perf_counter() - t0) * 1000)
 
     hits: list[dict[str, Any]] = []
@@ -114,6 +116,7 @@ def run_rag_chat(
             "summary": {
                 "query": user_text,
                 "hitCount": len(hits),
+                "rerankUsed": rerank_used,
                 "documents": sorted({h["document_title"] for h in hits if h["document_title"]}),
             },
         }
@@ -122,7 +125,14 @@ def run_rag_chat(
     if not hits:
         answer = REFUSAL_TEXT
         citations: list[dict[str, Any]] = []
-        usage = {"promptTokens": None, "completionTokens": None, "latencyMs": duration_ms}
+        usage = {
+            "promptTokens": None,
+            "completionTokens": None,
+            "latencyMs": duration_ms,
+            "rerankUsed": rerank_used,
+            "searchCalls": 1,
+            "citationCount": 0,
+        }
     else:
         llm_messages: list[dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -145,6 +155,9 @@ def run_rag_chat(
             "promptTokens": None,
             "completionTokens": None,
             "latencyMs": duration_ms + gen_ms,
+            "rerankUsed": rerank_used,
+            "searchCalls": 1,
+            "citationCount": len(citations),
         }
 
     assistant_msg = Message(
