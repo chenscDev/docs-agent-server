@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -28,6 +29,38 @@ DEFAULT_QUESTIONS = EVAL_DIR / "questions.json"
 RESULTS_DIR = EVAL_DIR / "results"
 
 
+def _load_api_token() -> str:
+    """优先环境变量，其次读取仓库 .env 中的 API_TOKEN。"""
+    env = (os.environ.get("API_TOKEN") or "").strip()
+    if env:
+        return env
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return ""
+    try:
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == "API_TOKEN":
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
+
+
+_API_TOKEN = _load_api_token()
+
+
+def _with_auth(headers: dict[str, str]) -> dict[str, str]:
+    """附加 Bearer Token（若已配置）。"""
+    out = dict(headers)
+    if _API_TOKEN:
+        out["Authorization"] = f"Bearer {_API_TOKEN}"
+    return out
+
+
 def http_json(
     method: str,
     url: str,
@@ -37,7 +70,7 @@ def http_json(
 ) -> dict[str, Any]:
     """发起 JSON 请求；失败抛 RuntimeError。"""
     body = None
-    headers = {"Accept": "application/json"}
+    headers = _with_auth({"Accept": "application/json"})
     if data is not None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -74,10 +107,12 @@ def upload_corpus(base_url: str, kb_id: str, corpus_path: Path) -> str:
     req = urllib.request.Request(
         url,
         data=body,
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Accept": "application/json",
-        },
+        headers=_with_auth(
+            {
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Accept": "application/json",
+            }
+        ),
         method="POST",
     )
     try:

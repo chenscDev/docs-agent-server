@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-v3"
     database_url: str = "sqlite:///./data/docs_agent.db"
 
+    # 客户端 API 鉴权（P2-D4）；非空则要求 Authorization: Bearer
+    api_token: str = ""
+
     # 上传与解析（D2）
     upload_dir: str = "./data/uploads"
     extracted_dir: str = "./data/extracted"

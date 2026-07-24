@@ -2,6 +2,17 @@
 
 客户端约定：JSON 字段 **驼峰**（`sessionId`）；错误体统一。
 
+## 0. 鉴权（P2-D4）
+
+| 项 | 约定 |
+|----|------|
+| 配置 | 服务端 `.env` → `API_TOKEN`（非空则开启） |
+| 请求头 | `Authorization: Bearer <token>` |
+| 放行 | 仅 `GET /health`（探活） |
+| 未带 / 错误 | `401`，`detail.code` = `AUTH_REQUIRED` / `AUTH_INVALID` |
+
+LLM Key（`LLM_API_KEY`）只留在服务端，不下发到端上。RN 在 `config` / Settings 配置客户端 Token，勿提交真实生产 Token。
+
 ## 1. 错误结构
 
 HTTP 4xx/5xx 的 `detail`（以及部分包装）为：
@@ -17,6 +28,7 @@ HTTP 4xx/5xx 的 `detail`（以及部分包装）为：
 
 | code 示例 | 含义 |
 |-----------|------|
+| `AUTH_REQUIRED` / `AUTH_INVALID` | 缺少或错误的 Bearer Token |
 | `UNSUPPORTED_TYPE` / `TOO_LARGE` | 上传校验 |
 | `PDF_ENCRYPTED` / `PDF_TOO_MANY_PAGES` / `PARSE_EMPTY` | 解析边角 |
 | `NO_READY_DOC` | 无就绪文档仍提问 |

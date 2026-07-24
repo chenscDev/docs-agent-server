@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import chat, chunks, debug, documents, health, knowledge_bases, meta, sessions
+from app.core.auth import ApiTokenAuthMiddleware
 from app.core.errors import error_detail
 from app.core.request_log import RequestLogMiddleware
 from app.db.session import init_db
@@ -31,11 +32,13 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="docs-agent-server",
-    description="文档问答 Agent 后端（P2：多知识库 / prefs / 改写检索）",
-    version="0.9.1",
+    description="文档问答 Agent 后端（P2：多知识库 / prefs / Token 鉴权）",
+    version="0.9.2",
     lifespan=lifespan,
 )
 
+# 先加内层鉴权，再加外层请求日志（探活仍由鉴权中间件放行 /health）
+app.add_middleware(ApiTokenAuthMiddleware)
 app.add_middleware(RequestLogMiddleware)
 
 
@@ -81,3 +84,16 @@ app.include_router(documents.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
 app.include_router(chunks.router)
+
+
+if __name__ == "__main__":
+    # IDE 可对本模块使用「Run Python File」；推荐直接运行仓库根目录 run.py
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+    )
+

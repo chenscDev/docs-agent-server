@@ -8,7 +8,7 @@
 | `rn-biz-0.86` → `src/docs-agent` | 聊天 / 知识库 / 引用 UI |
 | `rn-dynamic-0.86` | 原生宿主与分包加载 |
 
-**当前进度：二期 P2-D3（多知识库收尾）完成**；P2-D1/D2 已落地。
+**当前进度：二期 P2-D4（API Token 鉴权）完成**；P2-D1～D3 已落地。
 
 ## 这个项目解决什么问题
 
@@ -33,17 +33,25 @@
 
 ## 快速开始
 
+**首次环境（只需一次）：**
+
 ```bash
 cd docs-agent-server
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
 cp .env.example .env
 # 编辑 .env，填入 LLM_API_KEY（通义千问 DashScope）
-
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# 以及 API_TOKEN（客户端 Bearer；示例为 dev-local-token）
 ```
+
+**日常启动（推荐 IDE 一点即跑，不必敲命令）：**
+
+1. 用 Cursor / VS Code 打开本仓库，选择解释器为 `.venv`
+2. 打开根目录 [`run.py`](./run.py)，点右上角 ▶ **Run Python File**  
+   或：侧边栏「运行和调试」→ 选 **Docs Agent Server** → F5
+3. 浏览器访问 `http://127.0.0.1:8000/health` 应返回 `{"status":"ok"}`
+4. 业务接口须带 `Authorization: Bearer <API_TOKEN>`（与 `.env` 一致）
 
 启动后会在 `data/docs_agent.db` 建五表，并确保默认知识库 `kb_default`。
 
@@ -53,6 +61,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 |------|------|------|
 | `LLM_BASE_URL` | DashScope compatible | OpenAI 兼容基址 |
 | `LLM_API_KEY` | （必填） | 勿提交仓库 |
+| `API_TOKEN` | 空则关闭鉴权 | 非空时业务 API 须 `Authorization: Bearer`；`/health` 放行 |
 | `LLM_MODEL` | `qwen-plus` | 对话模型（需支持 tools） |
 | `EMBEDDING_MODEL` | `text-embedding-v3` | 全库须同一 embedding；更换需重建索引 |
 | `DATABASE_URL` | `sqlite:///./data/docs_agent.db` | SQLAlchemy |

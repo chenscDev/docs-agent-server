@@ -19,5 +19,9 @@ eval/results/
 
 # IDE / 系统
 .idea/
-.vscode/
+.vscode
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
 .DS_Store
+
