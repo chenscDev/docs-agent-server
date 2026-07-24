@@ -65,8 +65,9 @@
 **目标：** 进程重启不丢「解析中」任务（至少可恢复 pending）。
 
 **做：**
-- 引入轻量队列（推荐 **RQ + Redis**，或先用「启动时扫 pending/parsing 续跑」）  
-- `run_parse_job` 从 BackgroundTasks 改为入队  
+- ~~引入轻量队列（推荐 RQ + Redis，或先用「启动时扫 pending/parsing 续跑」）~~  
+  → **已落地**：进程内串行 `ThreadPoolExecutor` + DB 状态持久化 + 启动 `recover`（未上 Redis，演示单机足够）
+- `run_parse_job` 从 BackgroundTasks 改为 `enqueue_parse`
 - 文档状态仍走原状态机；失败可 reparse
 
 **验收：** 上传后杀 uvicorn 再启，文档能继续到 ready（或明确 failed 可点重试）。
@@ -100,5 +101,5 @@
 | P2-D1 改写二次检索 | **已完成** |
 | P2-D2～D3 多知识库 | **已完成**（CRUD + 切换 + prefs 持久化 + Settings） |
 | P2-D4 鉴权 | **已完成**（`API_TOKEN` + Bearer；`/health` 放行；RN Settings） |
-| P2-D5～D6 队列 | 待开始 |
+| P2-D5～D6 队列 | **已完成**（进程内串行队列 + 启动 recover；至少一次） |
 | P2-D7 回归叙事 | 待开始 |

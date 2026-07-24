@@ -16,6 +16,7 @@ from app.core.auth import ApiTokenAuthMiddleware
 from app.core.errors import error_detail
 from app.core.request_log import RequestLogMiddleware
 from app.db.session import init_db
+from app.rag.parse_queue import start_parse_queue, stop_parse_queue
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,15 +26,23 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """启动时建表并 seed 默认知识库。"""
+    """启动：建表 → 解析队列 + 恢复未完成任务；关闭时停 worker。"""
     init_db()
-    yield
+    n = start_parse_queue(recover=True)
+    logging.getLogger("docs_agent.startup").info(
+        "parse queue ready, recovered=%s",
+        n,
+    )
+    try:
+        yield
+    finally:
+        stop_parse_queue(wait=False)
 
 
 app = FastAPI(
     title="docs-agent-server",
-    description="文档问答 Agent 后端（P2：多知识库 / prefs / Token 鉴权）",
-    version="0.9.2",
+    description="文档问答 Agent 后端（P2：多知识库 / Token / 解析队列）",
+    version="0.9.3",
     lifespan=lifespan,
 )
 

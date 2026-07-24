@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,11 +17,11 @@ from app.db.models import Chunk, Document, KnowledgeBase
 from app.db.session import get_db
 from app.rag.extract import ALLOWED_EXTENSIONS, guess_mime, normalize_extension
 from app.rag.faiss_store import rebuild_kb_index
+from app.rag.parse_queue import enqueue_parse
 from app.rag.pipeline import (
     delete_chunks_for_document,
     extracted_text_path,
     resolve_storage_path,
-    run_parse_job,
 )
 from app.schemas.chunks import ChunkListOut, ChunkOut
 from app.schemas.documents import DocumentListOut, DocumentOut
@@ -72,12 +72,11 @@ def _upload_root() -> Path:
 )
 async def upload_document(
     kb_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
 ) -> DocumentOut:
-    """上传文档：校验 → 落盘 → pending → 后台 parsing。"""
+    """上传文档：校验 → 落盘 → pending → 解析队列。"""
     _ensure_kb(db, kb_id)
 
     raw_name = file.filename or "unnamed"
@@ -104,7 +103,6 @@ async def upload_document(
     display_title = (title or raw_name).strip() or raw_name
     return _enqueue_document(
         db,
-        background_tasks,
         kb_id=kb_id,
         title=display_title,
         ext=ext,
@@ -128,7 +126,6 @@ class TextDocumentRequest(BaseModel):
 def upload_text_document(
     kb_id: str,
     body: TextDocumentRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> DocumentOut:
     """以 Markdown/纯文本内容创建文档并进入解析流水线。"""
@@ -148,7 +145,6 @@ def upload_text_document(
     ext = normalize_extension(title)
     return _enqueue_document(
         db,
-        background_tasks,
         kb_id=kb_id,
         title=title,
         ext=ext if ext in ALLOWED_EXTENSIONS else ".md",
@@ -159,7 +155,6 @@ def upload_text_document(
 
 def _enqueue_document(
     db: Session,
-    background_tasks: BackgroundTasks,
     *,
     kb_id: str,
     title: str,
@@ -167,7 +162,7 @@ def _enqueue_document(
     data: bytes,
     mime_type: str,
 ) -> DocumentOut:
-    """落盘 + 入库 + 调度解析。"""
+    """落盘 + 入库 + 投递解析队列。"""
     doc_id = new_id("doc")
     dest = _upload_root() / f"{doc_id}{ext}"
     dest.write_bytes(data)
@@ -193,7 +188,8 @@ def _enqueue_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(run_parse_job, doc_id)
+    # status 已落库；入队失败也不丢任务（重启 recover 会扫到）
+    enqueue_parse(doc_id)
     return _to_out(doc)
 
 
@@ -300,7 +296,6 @@ def delete_document(doc_id: str, db: Session = Depends(get_db)) -> dict[str, str
 )
 def reparse_document(
     doc_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> DocumentOut:
     """重新解析（清 extracted / chunks，再走流水线）。"""
@@ -323,5 +318,5 @@ def reparse_document(
     db.commit()
     db.refresh(doc)
 
-    background_tasks.add_task(run_parse_job, doc_id)
+    enqueue_parse(doc_id)
     return _to_out(doc)

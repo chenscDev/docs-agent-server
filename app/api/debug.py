@@ -89,3 +89,11 @@ def debug_search(body: DebugSearchRequest, db: Session = Depends(get_db)) -> dic
             for h in hits
         ],
     }
+
+
+@router.get("/parse-queue")
+def debug_parse_queue() -> dict:
+    """查看解析队列快照（P2-D5～D6 排障）。"""
+    from app.rag.parse_queue import queue_snapshot
+
+    return queue_snapshot()

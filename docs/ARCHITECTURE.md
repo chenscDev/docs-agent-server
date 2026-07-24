@@ -52,6 +52,7 @@ upload/reparse
 
 - 仅 `ready` 的文档参与检索；否则聊天返回 `NO_READY_DOC`。
 - 删除 / reparse 会清 chunks，并 **重建该 KB 的 FAISS**，保证索引与元数据一致。
+- 解析投递：`enqueue_parse`（进程内串行队列）；`pending` 已落库即「至少一次」；启动扫描 `pending|parsing|indexing` 续跑。
 
 进度字段：`status` + `progress` + `stageMessage`（端上轮询用）。
 
@@ -121,8 +122,8 @@ RN 渲染气泡 / 工具卡 / 引用角标
 
 ## 8. 与生产的差距（诚实边界）
 
-- 单机 FAISS + SQLite，无任务队列、无多租户 ACL
-- 解析在 FastAPI `BackgroundTasks`，进程重启可能丢未完成任务
+- 单机 FAISS + SQLite，无多租户 ACL；解析为进程内队列（非 Redis/RQ）
 - Embedding / Chat 走云厂商 API，成本与限流依赖外部
+- 解析队列至少一次投递：重启可续跑，但不保证恰好一次
 
-这些不妨碍作品集叙事；面试时主动说出「下一步会加队列 / 按租户隔离索引」更加分。
+这些不妨碍作品集叙事；面试时主动说出「下一步可换 RQ/Redis、按租户隔离索引」更加分。

@@ -25,13 +25,15 @@ flowchart LR
 ```mermaid
 stateDiagram-v2
   [*] --> pending: 上传 / reparse
-  pending --> parsing: BackgroundTasks
+  pending --> parsing: parse_queue 入队
   parsing --> indexing: 切分完成
   indexing --> ready: FAISS 重建成功
   parsing --> failed: 提取失败
   indexing --> failed: 索引失败
   failed --> pending: reparse
   ready --> pending: reparse
+  parsing --> pending: 进程重启 recover
+  indexing --> pending: 进程重启 recover
 ```
 
 ## 3. 一次 SSE 问答

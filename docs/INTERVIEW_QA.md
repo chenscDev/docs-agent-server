@@ -97,7 +97,7 @@
 ## 卡片 13 · 和生产差距
 
 **问：** 和公司真实系统差在哪？  
-**答：** 单机 FAISS+SQLite、BackgroundTasks 无可靠队列、无多租户 ACL、无鉴权。演进：任务队列、按租户索引、网关鉴权、rerank、增量删向量。
+**答：** 单机 FAISS+SQLite、进程内解析队列（非 Redis 分布式）、薄 Bearer 鉴权、无多租户 ACL。演进：RQ/Redis、按租户索引、网关鉴权、rerank、增量删向量。
 
 ---
 

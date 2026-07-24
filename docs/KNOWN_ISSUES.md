@@ -26,10 +26,11 @@
 
 | 问题 | 影响 | 说明 |
 |------|------|------|
-| BackgroundTasks 解析 | 进程重启可能丢任务 | 练手可接受；生产改队列 |
+| 解析曾用 BackgroundTasks | 进程重启丢任务 | **P2-D5～D6 已改**：DB `pending` + 进程内串行队列 + 启动 recover |
+| 进程内队列非分布式 | 多进程/多机不能共享 | 演示单机足够；生产可换 RQ/Redis |
 | 单机 FAISS + 全量 rebuild | 文档多时删改变慢 | 按 KB 隔离；未做增量删向量优化到极致 |
 | SQLite | 并发写有限 | 单用户演示足够 |
-| 无鉴权 | 局域网可直打 API | Key 仅服务端；勿公网裸奔 |
+| 薄鉴权 | 局域网可直打 API | **P2-D4**：`API_TOKEN` Bearer；LLM Key 仅服务端 |
 | Embedding 批次 ≤10 | DashScope 限制 | `EMBEDDING_BATCH_SIZE=10` |
 
 ## 客户端联调

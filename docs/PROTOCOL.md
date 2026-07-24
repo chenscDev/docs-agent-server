@@ -71,6 +71,8 @@ HTTP 4xx/5xx 的 `detail`（以及部分包装）为：
 
 **status：** `pending` | `parsing` | `indexing` | `ready` | `failed`
 
+解析调度（P2-D5～D6）：上传 / reparse 后 `status=pending` 落库并 `enqueue_parse`；进程内串行执行。启动时扫描 `pending|parsing|indexing` 重置续跑（至少一次）。失败可 `POST .../reparse`。
+
 端上建议：上传后每 1～2s 轮询 `GET /v1/documents/{id}`，直到 `ready` / `failed`。
 
 ## 3. 会话
