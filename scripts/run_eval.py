@@ -169,6 +169,23 @@ def ask_chat(base_url: str, session_id: str, message: str) -> dict[str, Any]:
     )
 
 
+def ask_turns(
+    base_url: str, session_id: str, turns: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """
+    多轮同会话提问，返回最后一轮结果（用于 followup 粗判）。
+    """
+    last: dict[str, Any] = {}
+    for turn in turns:
+        msg = str(turn.get("message") or "").strip()
+        if not msg:
+            raise RuntimeError(f"turns 中存在空 message: {turns}")
+        last = ask_chat(base_url, session_id, msg)
+    if not last:
+        raise RuntimeError("turns 为空，无法评测")
+    return last
+
+
 def _norm(text: str) -> str:
     """去掉空白，降低「30天」vs「30 天」类误杀。"""
     return re.sub(r"\s+", "", text or "")
@@ -330,12 +347,20 @@ def main() -> int:
 
     for i, q in enumerate(questions, start=1):
         qid = q.get("id") or f"Q{i}"
-        print(f"[{i}/{len(questions)}] {qid} {q.get('question')}")
+        turns_preview = q.get("turns")
+        q_label = q.get("question") or (
+            " → ".join(str(t.get("message") or "") for t in (turns_preview or []))
+        )
+        print(f"[{i}/{len(questions)}] {qid} {q_label}")
         t0 = time.time()
         try:
-            # 每题独立会话，避免历史污染
+            # 每题独立会话，避免历史污染（followup 题在同一会话内走 turns）
             sid = create_session(base_url, kb_id)
-            result = ask_chat(base_url, sid, str(q["question"]))
+            turns = q.get("turns")
+            if turns:
+                result = ask_turns(base_url, sid, list(turns))
+            else:
+                result = ask_chat(base_url, sid, str(q["question"]))
             answer = str(result.get("answer") or "")
             citations = result.get("citations") or []
             usage = result.get("usage") or {}
@@ -346,7 +371,7 @@ def main() -> int:
             row = {
                 "id": qid,
                 "category": q.get("category"),
-                "question": q.get("question"),
+                "question": q_label,
                 "answer": answer,
                 "citations": citations,
                 "requestId": result.get("requestId"),
@@ -355,12 +380,13 @@ def main() -> int:
                 "verdict": scored["verdict"],
                 "reasons": scored["reasons"],
                 "sessionId": sid,
+                "followupRewriteUsed": usage.get("followupRewriteUsed"),
             }
         except Exception as exc:  # noqa: BLE001
             row = {
                 "id": qid,
                 "category": q.get("category"),
-                "question": q.get("question"),
+                "question": q_label,
                 "answer": "",
                 "citations": [],
                 "verdict": "fail",

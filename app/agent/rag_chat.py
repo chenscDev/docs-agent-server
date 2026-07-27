@@ -1,29 +1,15 @@
-"""非流式 RAG 问答编排（D5：服务端固定先检索再生成，事件化留给 D6）。"""
+"""非流式问答：复用 Agent SSE 编排（P3-D14），聚合为一次 JSON 响应。"""
 
 from __future__ import annotations
 
-import json
 import logging
-import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.agent.citations import build_citations
-from app.agent.history import select_history_window, to_chat_messages
-from app.agent.prompt import (
-    REFUSAL_TEXT,
-    SYSTEM_PROMPT,
-    build_context_block,
-    build_scene_line,
-)
-from app.core.ids import new_id
-from app.core.llm import LLMClient
-from app.db.models import Document, Message, Session as ChatSession
-from app.rag.retrieve import retrieve_for_query
+from app.agent.agent_stream import iter_agent_sse
+from app.db.models import Session as ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +27,6 @@ class ChatResult:
     usage: dict[str, Any]
 
 
-def count_ready_documents(db: Session, kb_id: str) -> int:
-    """统计已就绪文档数。"""
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(Document)
-            .where(Document.knowledge_base_id == kb_id, Document.status == "ready")
-        )
-        or 0
-    )
-
-
 def run_rag_chat(
     db: Session,
     session: ChatSession,
@@ -61,137 +35,83 @@ def run_rag_chat(
     client_message_id: str | None = None,
     top_k: int = 5,
 ) -> ChatResult:
-    """执行：历史窗口 → 检索 → 生成 → 落库。"""
-    request_id = new_id("req")
-    ready_count = count_ready_documents(db, session.knowledge_base_id)
-    if ready_count < 1:
+    """
+    执行与 /v1/chat/stream 同一套 Agent loop，再聚合成非流式结果。
+
+    top_k 保留参数以兼容旧调用；实际 top_k 由模型 tool args / 默认值决定。
+    """
+    _ = top_k  # Agent 路径由 search_docs 参数控制
+
+    user_message_id = ""
+    assistant_message_id = ""
+    request_id = ""
+    answer = ""
+    citations: list[dict[str, Any]] = []
+    tool_trace: list[dict[str, Any]] = []
+    usage: dict[str, Any] = {}
+    last_error: dict[str, Any] | None = None
+    completed: dict[str, Any] | None = None
+
+    for event in iter_agent_sse(
+        db,
+        session,
+        user_text,
+        client_message_id=client_message_id,
+        stream_text=False,
+    ):
+        etype = event.get("type") or ""
+        payload = event.get("payload") or {}
+        if event.get("requestId"):
+            request_id = str(event["requestId"])
+
+        if etype == "message.accepted":
+            user_message_id = str(payload.get("userMessageId") or "")
+        elif etype == "error":
+            last_error = dict(payload)
+        elif etype == "message.completed":
+            completed = dict(payload)
+            answer = str(payload.get("answer") or "")
+            citations = list(payload.get("citations") or [])
+            tool_trace = list(payload.get("toolTrace") or [])
+            usage = dict(payload.get("usage") or {})
+            aid = payload.get("assistantMessageId")
+            assistant_message_id = str(aid) if aid else ""
+
+    if last_error and last_error.get("code") == "NO_READY_DOC":
         raise ValueError("NO_READY_DOC")
 
-    # 历史（不含本轮 user）
-    prior = db.scalars(
-        select(Message)
-        .where(Message.session_id == session.id)
-        .order_by(Message.created_at.asc())
-    ).all()
-    window = select_history_window(list(prior))
+    if completed is None:
+        raise RuntimeError("AGENT_FAILED: 未收到 message.completed")
 
-    user_msg = Message(
-        id=new_id("msg"),
-        session_id=session.id,
-        role="user",
-        content=user_text,
-        status="completed",
-        client_message_id=client_message_id,
-        request_id=request_id,
-    )
-    db.add(user_msg)
-    db.flush()
+    status = str(completed.get("status") or "")
+    if status == "failed":
+        code = (last_error or {}).get("code") or "AGENT_FAILED"
+        if code == "NO_READY_DOC":
+            raise ValueError("NO_READY_DOC")
+        message = str((last_error or {}).get("message") or code)
+        raise RuntimeError(message)
 
-    # 检索（FAISS + 可选 Rerank）
-    t0 = time.perf_counter()
-    raw_hits, rerank_used = retrieve_for_query(
-        db, session.knowledge_base_id, user_text, top_k=top_k
-    )
-    duration_ms = int((time.perf_counter() - t0) * 1000)
-
-    hits: list[dict[str, Any]] = []
-    for i, h in enumerate(raw_hits, start=1):
-        hits.append(
-            {
-                "index": i,
-                "chunk_id": h.chunk_id,
-                "document_id": h.document_id,
-                "document_title": h.document_title,
-                "score": h.score,
-                "text": h.text[:400],
-            }
+    if status == "cancelled":
+        # 非流式路径一般不会取消；若发生仍返回已生成部分
+        logger.info(
+            "nonstream cancelled requestId=%s partialChars=%s",
+            request_id,
+            len(answer),
         )
 
-    tool_trace = [
-        {
-            "toolCallId": "call_search_1",
-            "name": "search_docs",
-            "ok": True,
-            "durationMs": duration_ms,
-            "summary": {
-                "query": user_text,
-                "hitCount": len(hits),
-                "rerankUsed": rerank_used,
-                "documents": sorted({h["document_title"] for h in hits if h["document_title"]}),
-            },
-        }
-    ]
-
-    if not hits:
-        answer = REFUSAL_TEXT
-        citations: list[dict[str, Any]] = []
-        usage = {
-            "promptTokens": None,
-            "completionTokens": None,
-            "latencyMs": duration_ms,
-            "rerankUsed": rerank_used,
-            "searchCalls": 1,
-            "citationCount": 0,
-        }
-    else:
-        llm_messages: list[dict[str, str]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "system",
-                "content": build_scene_line(ready_count=ready_count)
-                + "\n\n"
-                + build_context_block(hits),
-            },
-        ]
-        llm_messages.extend(to_chat_messages(window))
-        llm_messages.append({"role": "user", "content": user_text})
-
-        t1 = time.perf_counter()
-        client = LLMClient()
-        answer = client.chat(llm_messages)
-        gen_ms = int((time.perf_counter() - t1) * 1000)
-        citations = build_citations(answer, hits)
-        usage = {
-            "promptTokens": None,
-            "completionTokens": None,
-            "latencyMs": duration_ms + gen_ms,
-            "rerankUsed": rerank_used,
-            "searchCalls": 1,
-            "citationCount": len(citations),
-        }
-
-    assistant_msg = Message(
-        id=new_id("msg"),
-        session_id=session.id,
-        role="assistant",
-        content=answer,
-        status="completed",
-        request_id=request_id,
-        citations_json=json.dumps(citations, ensure_ascii=False),
-        tool_trace_json=json.dumps(tool_trace, ensure_ascii=False),
-        usage_json=json.dumps(usage, ensure_ascii=False),
-    )
-    db.add(assistant_msg)
-
-    # 更新会话预览与标题
-    session.last_preview = answer[:80]
-    session.updated_at = datetime.now(timezone.utc)
-    if not session.title:
-        session.title = user_text[:40]
-    db.commit()
-
     logger.info(
-        "rag chat session=%s req=%s hits=%s citations=%s",
+        "rag chat (agent) session=%s req=%s status=%s citations=%s tools=%s",
         session.id,
         request_id,
-        len(hits),
+        status,
         len(citations),
+        len(tool_trace),
     )
 
     return ChatResult(
-        request_id=request_id,
-        user_message_id=user_msg.id,
-        assistant_message_id=assistant_msg.id,
+        request_id=request_id or "req_unknown",
+        user_message_id=user_message_id,
+        assistant_message_id=assistant_message_id,
         answer=answer,
         citations=citations,
         tool_trace=tool_trace,

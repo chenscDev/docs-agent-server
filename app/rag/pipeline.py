@@ -16,7 +16,7 @@ from app.db import session as db_session
 from app.db.models import Chunk, Document
 from app.rag.chunker import split_text
 from app.rag.extract import ExtractError, extract_text
-from app.rag.faiss_store import rebuild_kb_index
+from app.rag.faiss_store import rebuild_kb_index, upsert_document_index
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,15 @@ def run_parse_job(doc_id: str) -> None:
 
         try:
             file_path = resolve_storage_path(doc.storage_key)
-            text = extract_text(file_path, doc.title)
+
+            def on_stage(message: str, progress: float | None) -> None:
+                """OCR / 提取阶段刷新文档进度，供端上轮询展示。"""
+                doc.stage_message = message
+                if progress is not None:
+                    doc.progress = progress
+                db.commit()
+
+            text = extract_text(file_path, doc.title, on_stage=on_stage)
             out = extracted_text_path(doc_id)
             out.write_text(text, encoding="utf-8")
 
@@ -118,11 +126,7 @@ def run_parse_job(doc_id: str) -> None:
             doc.stage_message = "正在建立向量索引…"
             db.commit()
 
-            vector_count = rebuild_kb_index(
-                db,
-                kb_id,
-                extra_document_id=doc_id,
-            )
+            vector_count = upsert_document_index(db, kb_id, doc_id)
             if vector_count <= 0:
                 raise RuntimeError("向量索引写入为空")
 

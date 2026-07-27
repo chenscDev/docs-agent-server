@@ -134,3 +134,26 @@ class Message(Base):
     )
 
     session: Mapped[Session] = relationship(back_populates="messages")
+
+
+class MessageFeedback(Base):
+    """助手消息反馈（点赞 / 点踩）。"""
+
+    __tablename__ = "message_feedbacks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    message_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("messages.id"), nullable=False, unique=True, index=True
+    )
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    # up | down
+    rating: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 是否已导出到评测候选
+    exported: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

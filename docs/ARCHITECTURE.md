@@ -39,7 +39,7 @@ app/
 
 **面试要点：** 向量库只负责相似度检索；展示原文、引用对齐一律回 SQLite 的 `chunks.id`。
 
-## 2.2 三期已落地（P3-D1～D4）
+## 2.2 三期已落地（P3-D1～D8 + D11～D15）
 
 | 能力 | 要点 |
 |------|------|
@@ -47,6 +47,14 @@ app/
 | 引用收紧 | 默认仅解析答案中的 `[n]`；`CITATION_FALLBACK_TOP3=true` 可恢复「无标记挂前 3」 |
 | 结构化切分 | 标题 → 段落 → 窗口；`chunks.metadata_json.heading` |
 | docx | `python-docx` 抽段落与表格；RN 上传可选 `.docx` |
+| OCR | PDF 文本层不足时逐页 `qwen-vl-ocr`；`OCR_MAX_PAGES` / `stageMessage` 页进度 |
+| 解析进度推送 | `GET /v1/documents/{id}/events` SSE；断线回退轮询 |
+| 多轮指代改写 | 追问结合历史改独立检索句；与空命中改写分 `rewriteReasons` |
+| 回答反馈 | 点赞/点踩落库；`POST /feedbacks/export-down` 进评测候选 |
+| FAISS 增量 | `IndexIDMap2` 按文档增删；`FAISS_INCREMENTAL`；失败全量 rebuild |
+| 多 Token 鉴权 | `API_TOKENS` 并集 + 作废列表 / 热作废文件；仍无 ACL |
+| 双路径编排统一 | `/v1/chat` 与 `/stream` 共用 Agent loop（非流式聚合 SSE 事件） |
+| 真取消 | cancel 可打断进行中的 LLM HTTP（单进程 httpx close） |
 
 ## 2.1 二期能力（P2）
 
@@ -54,7 +62,7 @@ app/
 |------|------|
 | 查询改写二次检索 | 首轮 `search_docs` 空命中时服务端改写 query 再搜（仍 ≤2 次）；`usage.rewriteUsed` / `searchQueries` 可观测 |
 | 多知识库 | KB CRUD；会话 / 上传绑 `knowledgeBaseId`；端上切换 + prefs 持久化 |
-| API Token | `Authorization: Bearer`；`/health` 放行；LLM Key 仍只在服务端 |
+| API Token | `API_TOKEN` ∪ `API_TOKENS`；作废见 `API_TOKENS_REVOKED` / `api_tokens_revoked.local`（P3-D13） |
 | 解析队列 | 进程内串行队列替代 BackgroundTasks；启动扫描 `pending|parsing|indexing` 续跑（至少一次） |
 
 ## 3. 文档状态机
@@ -69,10 +77,11 @@ upload/reparse
 ```
 
 - 仅 `ready` 的文档参与检索；否则聊天返回 `NO_READY_DOC`。
-- 删除 / reparse 会清 chunks，并 **重建该 KB 的 FAISS**，保证索引与元数据一致。
+- 删除 / reparse 会清 chunks，并 **增量更新该 KB 的 FAISS**（失败则全量 rebuild）。
 - 解析投递：`enqueue_parse`（进程内串行队列）；`pending` 已落库即「至少一次」；启动扫描 `pending|parsing|indexing` 续跑。
+- 索引（P3-D11）：解析成功走 `upsert_document_index`；删文档走 `delete_document_index`；`FAISS_INCREMENTAL=false` 时强制全量。日志含 `incremental_add/remove` 与 `ready_chunks` 对比线索。
 
-进度字段：`status` + `progress` + `stageMessage`（端上轮询用）。
+进度字段：`status` + `progress` + `stageMessage`（端上轮询 / SSE 用）。
 
 ## 4. 一次问答时序（SSE 主路径）
 
@@ -132,7 +141,7 @@ RN 渲染气泡 / 工具卡 / 引用角标
 - HTTP：`X-Request-Id` + 访问日志 `durationMs`
 - Agent：`requestId`（`req_…`）贯穿 SSE envelope 与 `messages` 表
 - `usage`：latencyMs / searchCalls / toolCallCount / citationCount / completionChars
-- 停止：`POST /v1/chat/cancel` 协作式取消；部分文本落库 `status=cancelled`
+- 停止：`POST /v1/chat/cancel` set 标记并 close 当前 LLM httpx 连接；部分文本落库 `status=cancelled`
 
 排障路径：端上气泡 `req=…` → 日志 / DB 同 `requestId` → 复盘 toolTrace。
 

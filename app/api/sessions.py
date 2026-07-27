@@ -9,9 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.api.feedback import feedback_map_for_messages
 from app.core.errors import raise_api_error
 from app.core.ids import new_id
-from app.db.models import KnowledgeBase, Message, Session as ChatSession
+from app.db.models import KnowledgeBase, Message, MessageFeedback, Session as ChatSession
 from app.db.session import DEFAULT_KB_ID, get_db
 
 router = APIRouter(prefix="/v1", tags=["sessions"])
@@ -94,6 +95,7 @@ def delete_session(session_id: str, db: Session = Depends(get_db)) -> dict[str, 
     if session is None:
         raise_api_error(404, "SESSION_NOT_FOUND", "会话不存在")
 
+    db.execute(delete(MessageFeedback).where(MessageFeedback.session_id == session_id))
     db.execute(delete(Message).where(Message.session_id == session_id))
     db.delete(session)
     db.commit()
@@ -120,6 +122,7 @@ def list_messages(
     ).all()
 
     items = []
+    fb_map = feedback_map_for_messages(db, [m.id for m in rows])
     for m in rows:
         item = {
             "id": m.id,
@@ -132,5 +135,14 @@ def list_messages(
             "toolTrace": json.loads(m.tool_trace_json) if m.tool_trace_json else None,
             "usage": json.loads(m.usage_json) if m.usage_json else None,
         }
+        fb = fb_map.get(m.id)
+        if fb is not None:
+            item["feedback"] = {
+                "rating": fb.rating,
+                "comment": fb.comment,
+                "updatedAt": fb.updated_at,
+            }
+        else:
+            item["feedback"] = None
         items.append(item)
     return {"items": items}

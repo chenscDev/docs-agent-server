@@ -38,7 +38,7 @@ class CancelRequest(BaseModel):
 
 @router.post("/chat")
 def chat(body: ChatRequest, db: Session = Depends(get_db)) -> dict:
-    """非流式文档问答（D5 路径，便于对比）。"""
+    """非流式文档问答：与 /chat/stream 共用 Agent loop（P3-D14）。"""
     session = db.get(ChatSession, body.session_id)
     if session is None:
         raise_api_error(404, "SESSION_NOT_FOUND", "会话不存在")
@@ -76,10 +76,10 @@ def chat(body: ChatRequest, db: Session = Depends(get_db)) -> dict:
 @router.post("/chat/cancel")
 def cancel_chat(body: CancelRequest) -> dict:
     """
-    请求停止正在进行的 SSE 生成（D19）。
+    请求停止正在进行的 SSE 生成（D19 / P3-D15）。
 
-    端上 Abort 仍可用；本接口让服务端在 tool/delta 间隙停止并落库 cancelled。
-    注意：正在阻塞的单次 LLM HTTP 调用无法立刻掐断，会在返回后生效。
+    端上 Abort 仍可用；本接口 set 取消标记并 close 进行中的 LLM HTTP，
+    服务端在 tool/delta 间隙或厂商连接打断后停止并落库 cancelled。
     """
     if not body.request_id and not body.session_id:
         raise_api_error(

@@ -13,9 +13,11 @@ __pycache__/
 data/
 *.db
 *.sqlite3
+data/api_tokens_revoked.local
 
 # 评测运行产物（语料与题库保留入库）
 eval/results/
+eval/feedback_candidates.jsonl
 
 # IDE / 系统
 .idea/

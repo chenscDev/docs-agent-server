@@ -28,7 +28,7 @@ from app.agent.cancel_registry import (
     register as register_cancel,
     unregister as unregister_cancel,
 )
-from app.agent.rewrite import rewrite_search_query
+from app.agent.rewrite import rewrite_followup_query, rewrite_search_query
 from app.core.ids import new_id
 from app.core.llm import LLMClient
 from app.db.models import Message, Session as ChatSession
@@ -43,6 +43,7 @@ AGENT_SYSTEM_PROMPT = """你是「文档问答助手」，只能依据工具返�
 - 「有哪些文档 / 手册在不在」：用 list_documents
 - search_docs 无命中时：必须改写 query（换同义词/制度关键词/去掉口语）再搜 1 次（合计最多 2 次）；仍无则明确拒答
 - 服务端可能在空命中后自动补一次改写检索，请优先依据最新 hits 作答
+- 多轮追问（含「那个/这个/上限呢」等）时：服务端可能已给出「独立检索句」，search_docs 应优先用该句，勿只用悬空代词
 - 不要假装已经检索过
 
 回答与引用：
@@ -64,12 +65,15 @@ def iter_agent_sse(
     user_text: str,
     *,
     client_message_id: str | None = None,
+    stream_text: bool = True,
 ) -> Iterator[dict[str, Any]]:
     """
     产出 SSE envelope 字典（由路由再 format_sse）。
 
     事件：message.accepted → tool.* → message.delta* → message.completed
     出错时：error → message.completed(failed)
+
+    stream_text=False 时跳过 delta 伪流式与 sleep（供非流式 /v1/chat 复用同一 Agent loop）。
     """
     request_id = new_id("req")
     seq = 0
@@ -151,15 +155,52 @@ def iter_agent_sse(
     search_calls = 0
     search_queries: list[str] = []
     rewrite_used = False
+    followup_rewrite_used = False
+    rewrite_reasons: list[str] = []
+    preferred_search_query: str | None = None
+    followup_applied_to_search = False
     rerank_used = False
     answer = ""
     emitted_parts: list[str] = []
     t_start = time.perf_counter()
 
+    # P3-D7：有历史且像追问时，先改写成独立检索句
+    try:
+        ensure_not_cancelled()
+        followup_q = rewrite_followup_query(
+            client,
+            user_text=user_text,
+            history=window,
+            request_id=request_id,
+        )
+    except GenerationCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("followup_rewrite unexpected: %s", exc)
+        followup_q = None
+
+    if followup_q:
+        preferred_search_query = followup_q
+        followup_rewrite_used = True
+        if "followup" not in rewrite_reasons:
+            rewrite_reasons.append("followup")
+        messages.insert(
+            2,
+            {
+                "role": "system",
+                "content": (
+                    f"本轮用户追问已改写为独立检索句：「{followup_q}」。"
+                    "调用 search_docs 时优先使用该 query，不要只用代词短句。"
+                ),
+            },
+        )
+
     try:
         for _round in range(MAX_TOOL_ROUNDS):
             ensure_not_cancelled()
-            msg = client.chat_with_tools(messages, TOOL_DEFINITIONS)
+            msg = client.chat_with_tools(
+                messages, TOOL_DEFINITIONS, request_id=request_id
+            )
             ensure_not_cancelled()
             tool_calls = getattr(msg, "tool_calls", None) or []
 
@@ -189,6 +230,32 @@ def iter_agent_sse(
                     ensure_not_cancelled()
                     name = tc.function.name
                     args = parse_tool_args(tc.function.arguments)
+
+                    # 首次 search：在 started 前应用指代改写句，便于端上看到真实 query
+                    if (
+                        name == "search_docs"
+                        and preferred_search_query
+                        and not followup_applied_to_search
+                        and search_calls == 0
+                    ):
+                        model_q = str(args.get("query") or "").strip()
+                        should_replace = (
+                            not model_q
+                            or model_q == user_text.strip()
+                            or len(model_q) <= 20
+                        )
+                        if model_q == preferred_search_query:
+                            followup_applied_to_search = True
+                        elif should_replace:
+                            args = {
+                                **args,
+                                "query": preferred_search_query,
+                                "rewritten": True,
+                                "rewriteReason": "followup",
+                                "originalQuery": user_text.strip(),
+                            }
+                            followup_applied_to_search = True
+
                     yield emit(
                         "tool.started",
                         {
@@ -223,6 +290,10 @@ def iter_agent_sse(
                                 last_hits = hits
                             if result.get("rerankUsed"):
                                 rerank_used = True
+                            if args.get("rewriteReason") == "followup":
+                                summary = dict(summary)
+                                summary["rewriteReason"] = "followup"
+                                summary["originalQuery"] = args.get("originalQuery") or user_text.strip()
                     else:
                         result, summary, hits = execute_tool(
                             db, session.knowledge_base_id, name, args
@@ -273,9 +344,12 @@ def iter_agent_sse(
                             client,
                             user_text=user_text,
                             failed_query=failed_q,
+                            request_id=request_id,
                         )
                         if rewritten:
                             rewrite_used = True
+                            if "empty_recall" not in rewrite_reasons:
+                                rewrite_reasons.append("empty_recall")
                             search_calls += 1
                             search_queries.append(rewritten)
                             syn_id = new_id("call")
@@ -288,6 +362,7 @@ def iter_agent_sse(
                                     "args": {
                                         **syn_args,
                                         "rewritten": True,
+                                        "rewriteReason": "empty_recall",
                                         "originalQuery": failed_q,
                                     },
                                 },
@@ -300,6 +375,7 @@ def iter_agent_sse(
                             )
                             summary2 = dict(summary2)
                             summary2["rewritten"] = True
+                            summary2["rewriteReason"] = "empty_recall"
                             summary2["originalQuery"] = failed_q
                             if result2.get("ok") and not (hits2 or []):
                                 result2 = dict(result2)
@@ -369,13 +445,16 @@ def iter_agent_sse(
             # 无 tool_calls：进入最终回答
             if msg.content:
                 full = msg.content
-                # 伪流式拆分；稍作间隔便于网关/RN XHR 增量刷新
-                for i in range(0, len(full), 18):
-                    ensure_not_cancelled()
-                    piece = full[i : i + 18]
-                    emitted_parts.append(piece)
-                    yield emit("message.delta", {"text": piece})
-                    time.sleep(0.025)
+                if stream_text:
+                    # 伪流式拆分；稍作间隔便于网关/RN XHR 增量刷新
+                    for i in range(0, len(full), 18):
+                        ensure_not_cancelled()
+                        piece = full[i : i + 18]
+                        emitted_parts.append(piece)
+                        yield emit("message.delta", {"text": piece})
+                        time.sleep(0.025)
+                else:
+                    emitted_parts.append(full)
                 answer = full
             else:
                 # 再开一轮纯流式生成（无 tools）
@@ -386,18 +465,28 @@ def iter_agent_sse(
                         "content": "请基于以上工具结果给出最终中文回答，并正确添加 [n] 引用。",
                     }
                 )
-                for delta in client.stream_chat(stream_messages):
+                if stream_text:
+                    for delta in client.stream_chat(
+                        stream_messages, request_id=request_id
+                    ):
+                        ensure_not_cancelled()
+                        emitted_parts.append(delta)
+                        yield emit("message.delta", {"text": delta})
+                    answer = "".join(emitted_parts)
+                else:
+                    # 非流式复用路径：一次取全文，避免 chunk sleep
                     ensure_not_cancelled()
-                    emitted_parts.append(delta)
-                    yield emit("message.delta", {"text": delta})
-                answer = "".join(emitted_parts)
+                    full = client.chat(stream_messages, request_id=request_id)
+                    emitted_parts.append(full)
+                    answer = full
 
             break
         else:
             answer = answer or REFUSAL_TEXT
             if not answer:
                 emitted_parts.append(REFUSAL_TEXT)
-                yield emit("message.delta", {"text": REFUSAL_TEXT})
+                if stream_text:
+                    yield emit("message.delta", {"text": REFUSAL_TEXT})
                 answer = REFUSAL_TEXT
 
         ensure_not_cancelled()
@@ -405,7 +494,8 @@ def iter_agent_sse(
         if not answer.strip():
             answer = REFUSAL_TEXT
             emitted_parts.append(answer)
-            yield emit("message.delta", {"text": answer})
+            if stream_text:
+                yield emit("message.delta", {"text": answer})
 
         # 若从未检索且也不是列目录类，仍允许模型回答；citations 仅来自 last_hits
         citations = build_citations(answer, last_hits)
@@ -419,6 +509,8 @@ def iter_agent_sse(
             "searchCalls": search_calls,
             "searchQueries": search_queries,
             "rewriteUsed": rewrite_used,
+            "followupRewriteUsed": followup_rewrite_used,
+            "rewriteReasons": rewrite_reasons,
             "rerankUsed": rerank_used,
             "toolCallCount": len(tool_trace),
             "citationCount": len(citations),
@@ -444,12 +536,15 @@ def iter_agent_sse(
 
         logger.info(
             "agent_ok requestId=%s sessionId=%s latencyMs=%s searchCalls=%s "
-            "rewriteUsed=%s rerankUsed=%s tools=%s citations=%s chars=%s",
+            "rewriteUsed=%s followupRewriteUsed=%s rewriteReasons=%s "
+            "rerankUsed=%s tools=%s citations=%s chars=%s",
             request_id,
             session.id,
             latency_ms,
             search_calls,
             rewrite_used,
+            followup_rewrite_used,
+            rewrite_reasons,
             rerank_used,
             len(tool_trace),
             len(citations),
@@ -488,6 +583,8 @@ def iter_agent_sse(
             "searchCalls": search_calls,
             "searchQueries": search_queries,
             "rewriteUsed": rewrite_used,
+            "followupRewriteUsed": followup_rewrite_used,
+            "rewriteReasons": rewrite_reasons,
             "rerankUsed": rerank_used,
             "toolCallCount": len(tool_trace),
             "citationCount": len(citations),

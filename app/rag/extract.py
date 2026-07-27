@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+
+from app.core.config import get_settings
 
 # 允许的扩展名（小写）
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".markdown", ".docx"}
@@ -17,6 +20,8 @@ MIME_BY_EXT = {
 
 # 演示/练手期 PDF 页数上限（过大易拖垮本机 embedding）
 MAX_PDF_PAGES = 100
+
+StageCallback = Callable[[str, float | None], None]
 
 
 class ExtractError(Exception):
@@ -39,11 +44,17 @@ def guess_mime(filename: str) -> str:
     return MIME_BY_EXT.get(ext, "application/octet-stream")
 
 
-def extract_text(file_path: Path, filename: str) -> str:
+def extract_text(
+    file_path: Path,
+    filename: str,
+    *,
+    on_stage: StageCallback | None = None,
+) -> str:
     """
     提取文本。
 
     成功返回非空字符串；失败抛 ExtractError（带稳定 code）。
+    on_stage：可选进度回调 (message, progress|None)，供 OCR 页进度刷新。
     """
     ext = normalize_extension(filename)
     if ext not in ALLOWED_EXTENSIONS:
@@ -54,7 +65,7 @@ def extract_text(file_path: Path, filename: str) -> str:
 
     try:
         if ext == ".pdf":
-            text = _extract_pdf(file_path)
+            text = _extract_pdf(file_path, on_stage=on_stage)
         elif ext == ".docx":
             text = _extract_docx(file_path)
         else:
@@ -71,6 +82,11 @@ def extract_text(file_path: Path, filename: str) -> str:
             "未能提取到可用文本（可能是扫描版 PDF、空文件或仅图片页）",
         )
     return cleaned
+
+
+def _effective_char_count(text: str) -> int:
+    """统计有效字符（去空白），用于判断文本层是否「够用」。"""
+    return len("".join((text or "").split()))
 
 
 def _extract_plain_text(file_path: Path) -> str:
@@ -109,8 +125,12 @@ def _extract_docx(file_path: Path) -> str:
     return "\n".join(parts)
 
 
-def _extract_pdf(file_path: Path) -> str:
-    """使用 PyMuPDF 提取 PDF 文本，处理加密 / 空页 / 页数上限。"""
+def _extract_pdf(
+    file_path: Path,
+    *,
+    on_stage: StageCallback | None = None,
+) -> str:
+    """使用 PyMuPDF 提取 PDF 文本；不足时走云 OCR。"""
     try:
         import fitz  # pymupdf
     except ModuleNotFoundError as exc:
@@ -119,6 +139,9 @@ def _extract_pdf(file_path: Path) -> str:
             "缺少 PyMuPDF（import fitz 失败）。请用仓库 .venv 启动服务："
             ".venv/bin/pip install -r requirements.txt",
         ) from exc
+
+    settings = get_settings()
+    min_chars = max(1, int(settings.ocr_min_chars))
 
     with fitz.open(file_path) as doc:
         if doc.is_encrypted:
@@ -145,4 +168,23 @@ def _extract_pdf(file_path: Path) -> str:
         for page in doc:
             parts.append(page.get_text("text") or "")
 
-    return "\n".join(parts)
+    layer_text = "\n".join(parts)
+    if _effective_char_count(layer_text) >= min_chars:
+        return layer_text
+
+    # 文本层不足：尝试 OCR
+    if not settings.ocr_enabled:
+        raise ExtractError(
+            "PARSE_EMPTY",
+            "未能提取到可用文本（可能是扫描版 PDF）。当前已关闭 OCR（OCR_ENABLED=false）",
+        )
+
+    from app.rag.ocr import OcrError, ocr_pdf_file
+
+    if on_stage is not None:
+        on_stage("文本层不足，开始 OCR…", 0.15)
+
+    try:
+        return ocr_pdf_file(file_path, on_progress=on_stage)
+    except OcrError as exc:
+        raise ExtractError(exc.code, exc.message) from exc

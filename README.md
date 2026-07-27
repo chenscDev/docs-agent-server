@@ -27,11 +27,14 @@
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | 分层、状态机、一次请求时序、记忆 vs 检索 |
 | [docs/DIAGRAMS.md](./docs/DIAGRAMS.md) | Mermaid 架构图（可导出 PNG） |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | HTTP / SSE / cancel 契约 |
+| [docs/INTERVIEW_QA.md](./docs/INTERVIEW_QA.md) | 模拟面试自问自答 |
+| [docs/INTERVIEW_CHEATSHEET_ALIYUN.md](./docs/INTERVIEW_CHEATSHEET_ALIYUN.md) | 阿里云二面 · 三栏速查 |
+| [docs/INTERVIEW_CHEATSHEET_ANT.md](./docs/INTERVIEW_CHEATSHEET_ANT.md) | 蚂蚁二面 · 三栏速查 |
+| [docs/INTERVIEW_ANSWERS_RECITE.md](./docs/INTERVIEW_ANSWERS_RECITE.md) | **可背诵完整答稿**（原题 + 项目锚点 + 解释） |
 | [docs/KNOWN_ISSUES.md](./docs/KNOWN_ISSUES.md) | 已知限制与和产品的差距 |
 | [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md) | 30 秒 / 3 分钟演示口播与操作清单 |
 | [docs/DEMO_VIDEO.md](./docs/DEMO_VIDEO.md) | 短视频镜头表与剪辑要点 |
 | [docs/RESUME.md](./docs/RESUME.md) | 简历项目描述初稿（中/英） |
-| [docs/INTERVIEW_QA.md](./docs/INTERVIEW_QA.md) | 模拟面试自问自答 15 卡 |
 | [eval/FAILURE_CASES.md](./eval/FAILURE_CASES.md) | 评测失败归因 |
 
 ## 快速开始
@@ -64,7 +67,9 @@ cp .env.example .env
 |------|------|------|
 | `LLM_BASE_URL` | DashScope compatible | OpenAI 兼容基址 |
 | `LLM_API_KEY` | （必填） | 勿提交仓库 |
-| `API_TOKEN` | 空则关闭鉴权 | 非空时业务 API 须 `Authorization: Bearer`；`/health` 放行 |
+| `API_TOKEN` | 空则看并集 | 单 Token（兼容）；与 `API_TOKENS` 并集非空则开启鉴权 |
+| `API_TOKENS` | 空 | 多个有效 Token，逗号分隔 |
+| `API_TOKENS_REVOKED` | 空 | 作废 Token，逗号分隔 |
 | `LLM_MODEL` | `qwen-plus` | 对话模型（需支持 tools） |
 | `EMBEDDING_MODEL` | `text-embedding-v3` | 全库须同一 embedding；更换需重建索引 |
 | `DATABASE_URL` | `sqlite:///./data/docs_agent.db` | SQLAlchemy |
@@ -72,6 +77,11 @@ cp .env.example .env
 | `MAX_UPLOAD_MB` | `20` | 上传上限 |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `500` / `80` | 切分 |
 | `EMBEDDING_BATCH_SIZE` | `10` | 通义单批上限 |
+| `FAISS_INCREMENTAL` | `true` | 按文档增量增删向量；失败全量 rebuild |
+| `OCR_ENABLED` | `true` | 扫描 PDF 文本层不足时走云 OCR |
+| `OCR_MODEL` | `qwen-vl-ocr-latest` | 通义 OCR 模型 |
+| `OCR_MAX_PAGES` | `20` | OCR 页数上限（费用保护） |
+| `OCR_MIN_CHARS` | `40` | 文本层有效字符低于此值则 OCR |
 
 完整字段见 `app/core/config.py`。
 

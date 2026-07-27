@@ -99,12 +99,12 @@
 | P3-D2 | 引用收紧 | **已完成**（默认无 `[n]` 不挂 citation；`CITATION_FALLBACK_TOP3` 可开） |
 | P3-D3 | 结构化切分 | **已完成**（标题→段落→窗口；`metadata_json.heading`） |
 | P3-D4 | docx | **已完成**（python-docx 抽段落/表；RN 上传可选） |
-| P3-D5 | OCR | 待开始 |
-| P3-D6 | 解析进度推送 | 待开始 |
-| P3-D7 | 多轮指代改写 | 待开始 |
-| P3-D8 | 反馈闭环 | 待开始 |
+| P3-D5 | OCR | **已完成**（文本层不足 → 逐页 qwen-vl-ocr；页上限 / `stageMessage` 进度） |
+| P3-D6 | 解析进度推送 | **已完成**（`GET …/events` SSE；RN 优先订阅，断线回退轮询） |
+| P3-D7 | 多轮指代改写 | **已完成**（历史改写独立 query；`followupRewriteUsed` / `rewriteReasons`） |
+| P3-D8 | 反馈闭环 | **已完成**（点赞/点踩落库；down 导出 jsonl + FAILURE 候选） |
 | P3-D9～D10 | RQ + Redis | 待开始（建议升配后再做） |
-| P3-D11～D12 | FAISS 增量 | 待开始 |
-| P3-D13 | 多 Token 鉴权 | 待开始 |
-| P3-D14 | 双路径编排统一 | 待开始 |
-| P3-D15 | 真取消 + 回归叙事 | 待开始 |
+| P3-D11～D12 | FAISS 增量 | **已完成**（IndexIDMap2 增删；失败全量 rebuild；日志含耗时对比线索） |
+| P3-D13 | 多 Token 鉴权 | **已完成**（API_TOKENS 并集 + REVOKED / 本地文件热作废） |
+| P3-D14 | 双路径编排统一 | **已完成**（`/v1/chat` 聚合同一 `iter_agent_sse`；`stream_text=False`） |
+| P3-D15 | 真取消 + 回归叙事 | **已完成**（cancel 打断 LLM HTTP；评测扩至 25 题含 followup turns） |

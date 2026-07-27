@@ -20,8 +20,14 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-v3"
     database_url: str = "sqlite:///./data/docs_agent.db"
 
-    # 客户端 API 鉴权（P2-D4）；非空则要求 Authorization: Bearer
+    # 客户端 API 鉴权（P2-D4 / P3-D13）；有效 Token 非空则要求 Bearer
     api_token: str = ""
+    # 多个有效 Token，逗号/分号/空白分隔（与 api_token 并集）
+    api_tokens: str = ""
+    # 已作废 Token（仍写在 API_TOKENS 里也会被拒绝）
+    api_tokens_revoked: str = ""
+    # 热作废文件：每行一个 Token；改文件无需重启进程
+    api_tokens_revoked_file: str = "./data/api_tokens_revoked.local"
 
     # 上传与解析（D2）
     upload_dir: str = "./data/uploads"
@@ -35,6 +41,8 @@ class Settings(BaseSettings):
     # 向量索引（D4）；通义 embedding 单批上限为 10
     faiss_dir: str = "./data/faiss"
     embedding_batch_size: int = 10
+    # P3-D11：增量索引；失败自动全量 rebuild
+    faiss_incremental: bool = True
 
     # P3-D1 检索重排
     rerank_enabled: bool = True
@@ -48,6 +56,13 @@ class Settings(BaseSettings):
 
     # P3-D2 引用：默认不「无 [n] 仍挂前 3 条」；演示可开
     citation_fallback_top3: bool = False
+
+    # P3-D5 扫描 PDF OCR（文本层不足时走通义 qwen-vl-ocr）
+    ocr_enabled: bool = True
+    ocr_model: str = "qwen-vl-ocr-latest"
+    ocr_max_pages: int = 20
+    ocr_min_chars: int = 40
+    ocr_timeout_sec: float = 60.0
 
 
 @lru_cache

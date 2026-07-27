@@ -76,7 +76,7 @@
 ## 卡片 10 · 停止生成
 
 **问：** 停止按钮怎么做的？  
-**答：** 端上 Abort 断开 SSE；同时 `POST /v1/chat/cancel` 标记 requestId，服务端在 tool/delta 间隙抛取消，落库 `cancelled` 与已推送的部分文本。正在阻塞的单次 LLM HTTP 要等返回后才停。
+**答：** 端上先 `POST /v1/chat/cancel` 再 Abort 断开 SSE。服务端 set requestId 取消标记，并 close 该轮绑定的 LLM httpx 连接以打断阻塞中的厂商调用；随后在 tool/delta 间隙抛 `GenerationCancelled`，落库 `cancelled` 与已推送部分文本。多进程/多机下 cancel 仍是进程内的，生产可换共享总线。
 
 ---
 

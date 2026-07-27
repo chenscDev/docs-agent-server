@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -15,8 +16,9 @@ from app.core.errors import raise_api_error
 from app.core.ids import new_id
 from app.db.models import Chunk, Document, KnowledgeBase
 from app.db.session import get_db
+from app.rag.document_events import iter_document_parse_sse
 from app.rag.extract import ALLOWED_EXTENSIONS, guess_mime, normalize_extension
-from app.rag.faiss_store import rebuild_kb_index
+from app.rag.faiss_store import delete_document_index, rebuild_kb_index
 from app.rag.parse_queue import enqueue_parse
 from app.rag.pipeline import (
     delete_chunks_for_document,
@@ -215,11 +217,30 @@ def list_documents(kb_id: str, db: Session = Depends(get_db)) -> DocumentListOut
     response_model_by_alias=True,
 )
 def get_document(doc_id: str, db: Session = Depends(get_db)) -> DocumentOut:
-    """文档详情（供轮询状态）。"""
+    """文档详情（供轮询状态 / SSE 降级）。"""
     doc = db.get(Document, doc_id)
     if doc is None:
         raise_api_error(404, "DOC_NOT_FOUND", "文档不存在")
     return _to_out(doc)
+
+
+@router.get("/documents/{doc_id}/events")
+def document_parse_events(doc_id: str) -> StreamingResponse:
+    """
+    文档解析进度 SSE（P3-D6）。
+
+    事件：document.snapshot / document.progress / document.completed / error
+    鉴权走全局 Bearer；断线后客户端应回退 GET /documents/{id} 轮询。
+    """
+    return StreamingResponse(
+        iter_document_parse_sse(doc_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
@@ -282,9 +303,13 @@ def delete_document(doc_id: str, db: Session = Depends(get_db)) -> dict[str, str
             logger.warning("删除文件失败 %s: %s", path, exc)
 
     try:
-        rebuild_kb_index(db, kb_id)
+        delete_document_index(db, kb_id, doc_id)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("删除后重建索引失败 kb=%s: %s", kb_id, exc)
+        logger.exception("删除后更新索引失败 kb=%s: %s", kb_id, exc)
+        try:
+            rebuild_kb_index(db, kb_id)
+        except Exception as exc2:  # noqa: BLE001
+            logger.exception("删除后全量重建也失败 kb=%s: %s", kb_id, exc2)
 
     return {"status": "deleted", "id": doc_id}
 

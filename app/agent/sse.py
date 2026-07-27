@@ -15,11 +15,31 @@ def make_event(
     event_type: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """统一 envelope。"""
+    """统一 envelope（问答流）。"""
     return {
         "v": 1,
         "requestId": request_id,
         "sessionId": session_id,
+        "seq": seq,
+        "ts": int(time.time() * 1000),
+        "type": event_type,
+        "payload": payload,
+    }
+
+
+def make_doc_event(
+    *,
+    stream_id: str,
+    document_id: str,
+    seq: int,
+    event_type: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """文档解析进度 SSE envelope（P3-D6）。"""
+    return {
+        "v": 1,
+        "streamId": stream_id,
+        "documentId": document_id,
         "seq": seq,
         "ts": int(time.time() * 1000),
         "type": event_type,

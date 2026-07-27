@@ -11,7 +11,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import chat, chunks, debug, documents, health, knowledge_bases, meta, sessions
+from app.api import (
+    chat,
+    chunks,
+    debug,
+    documents,
+    feedback,
+    health,
+    knowledge_bases,
+    meta,
+    sessions,
+)
 from app.core.auth import ApiTokenAuthMiddleware
 from app.core.errors import error_detail
 from app.core.request_log import RequestLogMiddleware
@@ -91,6 +101,7 @@ app.include_router(meta.router)
 app.include_router(knowledge_bases.router)
 app.include_router(documents.router)
 app.include_router(sessions.router)
+app.include_router(feedback.router)
 app.include_router(chat.router)
 app.include_router(chunks.router)
 

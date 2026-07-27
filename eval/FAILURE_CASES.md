@@ -43,3 +43,19 @@
 - 报告：`eval/results/eval_20260724_110754.json`
 - 新失败：无（无需新增 open Case）
 - 面试一句：二期改写 / 多 KB / 鉴权 / 队列落地后，固定集仍全绿；失败归因仍靠本文件，不把粗判当金标准
+
+### 2026-07-27 · P3-D15 回归（扩至 25 题）
+- 首跑：24/25；Q08 答案为「无需提供发票」被 expectAny 误杀（非 RAG 错）
+- 改进：题库 expectAny 兼容「无需提供发票」等说法
+- 复跑：**25/25 pass（100%）**（含 Q21～Q25：改写 / 联系人 / 拒答写诗 / followup turns / 多要点）
+- 报告：`eval/results/eval_20260727_164011.json`
+- 面试一句：三期 Rerank / 指代改写 / 双路径统一 / cancel 打断 LLM 后，固定集仍全绿；粗判仍会误杀，FAILURE_CASES 记归因
+
+## 用户点踩候选（P3-D8 自动导出）
+
+### 2026-07-27 · feedback · (未知问题)
+- 来源：用户点踩（feedbackId=`fb_cfa05bddeb46`）
+- requestId：`req_x`
+- 评论：数字不对
+- 归因：待人工审（检索/切分/Prompt/幻觉/其他）
+- 状态：open

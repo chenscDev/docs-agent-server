@@ -1,22 +1,22 @@
-"""API Token 鉴权中间件（P2-D4）。
+"""API Token 鉴权中间件（P2-D4 / P3-D13 多 Token）。
 
 约定：
-- 环境变量 API_TOKEN 非空时，业务接口须带 Authorization: Bearer <token>
-- /health 始终放行（探活）
-- API_TOKEN 为空时不强制鉴权（便于首次起服；验收前请在 .env 配置）
+- API_TOKEN / API_TOKENS 解析出至少一个有效 Token 时，业务接口须 Bearer
+- API_TOKENS_REVOKED 与 data/api_tokens_revoked.local 中的 Token 不可用
+- /health 始终放行
+- 无有效 Token 时不强制鉴权（便于首次起服）
 """
 
 from __future__ import annotations
 
 import logging
-import secrets
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from app.core.config import get_settings
 from app.core.errors import error_detail
+from app.core.tokens import auth_enabled, is_api_token_valid
 
 logger = logging.getLogger("docs_agent.auth")
 
@@ -35,15 +35,14 @@ def _extract_bearer(authorization: str | None) -> str | None:
 
 
 class ApiTokenAuthMiddleware(BaseHTTPMiddleware):
-    """校验 Bearer Token；未配置 API_TOKEN 时跳过。"""
+    """校验 Bearer Token；未配置任何有效 Token 时跳过。"""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
         if path in _PUBLIC_PATHS:
             return await call_next(request)
 
-        expected = (get_settings().api_token or "").strip()
-        if not expected:
+        if not auth_enabled():
             return await call_next(request)
 
         provided = _extract_bearer(request.headers.get("authorization"))
@@ -53,11 +52,11 @@ class ApiTokenAuthMiddleware(BaseHTTPMiddleware):
                 code="AUTH_REQUIRED",
                 message="缺少 Authorization: Bearer <token>",
             )
-        if not secrets.compare_digest(provided, expected):
+        if not is_api_token_valid(provided):
             return _unauthorized(
                 request,
                 code="AUTH_INVALID",
-                message="API Token 无效",
+                message="API Token 无效或已作废",
             )
         return await call_next(request)
 

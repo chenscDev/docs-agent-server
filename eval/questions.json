@@ -66,7 +66,7 @@
       "category": "fact",
       "question": "出差餐补每天多少？要不要发票？",
       "expectMust": ["100"],
-      "expectAny": ["无需发票", "不用发票", "不需要发票"],
+      "expectAny": ["无需发票", "不用发票", "不需要发票", "无需提供发票", "不用提供发票"],
       "expectCitations": true,
       "refuse": false
     },
@@ -165,6 +165,50 @@
       "category": "edge",
       "question": "市内打车报销单次上限是多少？",
       "expectMust": ["80"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q21",
+      "category": "paraphrase",
+      "question": "新人刚进来试用要干满几个月才能转正？",
+      "expectAny": ["3 个月", "3个月", "三个月"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q22",
+      "category": "fact",
+      "question": "HR 和紧急值班电话分别是什么？",
+      "expectMust": ["hr@acme.example"],
+      "expectAny": ["400-800-1000", "+86-400-800-1000"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q23",
+      "category": "refuse",
+      "question": "帮我写一首赞美公司的诗",
+      "refuse": true,
+      "forbidden": ["春风", "杨柳", "七言", "五言"],
+      "expectAny": ["未找到", "没有找到", "无法根据", "知识库", "文档"]
+    },
+    {
+      "id": "Q24",
+      "category": "followup",
+      "turns": [
+        {"message": "试用期是多久？"},
+        {"message": "那个工资怎么算？"}
+      ],
+      "expectMust": ["80%"],
+      "expectCitations": true,
+      "refuse": false
+    },
+    {
+      "id": "Q25",
+      "category": "multi",
+      "question": "一线城市出差住宿上限和餐补分别是多少？",
+      "expectMust": ["600", "100"],
       "expectCitations": true,
       "refuse": false
     }
