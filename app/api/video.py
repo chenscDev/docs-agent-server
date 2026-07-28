@@ -22,6 +22,7 @@ from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
 from app.video.schema import TEMPLATE_CATALOG, TemplateId, validate_storyboard
+from app.video.preview_page import build_preview_html
 from app.video.service import (
     create_job,
     delete_job,
@@ -340,7 +341,22 @@ def video_meta() -> dict[str, Any]:
         "templates": len(TEMPLATE_CATALOG),
         "cdnPath": "/cdn/video/",
         "ttsEnabled": settings.video_tts_enabled,
+        "previewPath": "/v1/video/preview",
     }
+
+
+@router.get("/preview", response_class=HTMLResponse)
+def remotion_style_preview() -> HTMLResponse:
+    """
+    RN WebView 嵌入的分镜实时预览页。
+    协议：preview/update | preview/seek | preview/play | preview/pause
+    （与后续 @remotion/player 桥接保持同一消息类型）
+    """
+    # 去掉无效的 X-Frame-Options；WebView 直接 load URL 不依赖 iframe
+    return HTMLResponse(
+        content=build_preview_html(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/player/{job_id}", response_class=HTMLResponse)
