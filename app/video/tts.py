@@ -10,6 +10,14 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# 常见可用组合（按优先级）；418/InvalidParameter 时自动换下一组
+_TTS_FALLBACKS: list[tuple[str, str]] = [
+    ("cosyvoice-v2", "longxiaochun_v2"),
+    ("cosyvoice-v1", "longxiaochun"),
+    ("cosyvoice-v3-flash", "longanyang"),
+    ("cosyvoice-v3-flash", "longxiaochun"),
+]
+
 
 def scene_narration_text(*, headline: str, body: str = "") -> str:
     """口播文案：标题 + 说明。"""
@@ -22,7 +30,7 @@ def scene_narration_text(*, headline: str, body: str = "") -> str:
 
 def synthesize_to_file(text: str, output_path: Path) -> Path | None:
     """
-    合成语音到 output_path（wav/mp3，由 SDK 决定）。
+    合成语音到 output_path（wav）。
     成功返回路径；关闭 TTS / 无 Key / 调用失败返回 None。
     """
     settings = get_settings()
@@ -47,46 +55,65 @@ def synthesize_to_file(text: str, output_path: Path) -> Path | None:
         return None
 
     dashscope.api_key = api_key
-    model = (settings.video_tts_model or "cosyvoice-v3-flash").strip()
-    voice = (settings.video_tts_voice or "longxiaochun_v2").strip()
+    preferred = (
+        (settings.video_tts_model or "").strip(),
+        (settings.video_tts_voice or "").strip(),
+    )
+    combos: list[tuple[str, str]] = []
+    if preferred[0] and preferred[1]:
+        combos.append(preferred)
+    for item in _TTS_FALLBACKS:
+        if item not in combos:
+            combos.append(item)
 
-    try:
-        synthesizer = SpeechSynthesizer(
-            model=model,
-            voice=voice,
-            format=AudioFormat.WAV_16000HZ_MONO_16BIT,
-        )
-        audio = synthesizer.call(text)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("TTS 调用失败: %s", exc)
-        return None
-
-    if not audio:
-        logger.warning("TTS 返回空音频 text=%s", text[:40])
-        return None
-
-    raw = audio if isinstance(audio, (bytes, bytearray)) else None
-    if raw is None and hasattr(audio, "get_audio_data"):
+    last_err = ""
+    for model, voice in combos:
         try:
-            raw = audio.get_audio_data()
+            synthesizer = SpeechSynthesizer(
+                model=model,
+                voice=voice,
+                format=AudioFormat.WAV_16000HZ_MONO_16BIT,
+            )
+            audio = synthesizer.call(text)
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+            logger.warning("TTS 调用失败 model=%s voice=%s: %s", model, voice, exc)
+            continue
+
+        raw = _extract_audio_bytes(audio)
+        if not raw:
+            last_err = f"empty audio model={model} voice={voice}"
+            logger.warning("TTS 空音频 model=%s voice=%s text=%s", model, voice, text[:40])
+            continue
+
+        out = (
+            output_path
+            if output_path.suffix.lower() == ".wav"
+            else output_path.with_suffix(".wav")
+        )
+        out.write_bytes(raw)
+        if out.is_file() and out.stat().st_size >= 64:
+            logger.info("TTS 成功 model=%s voice=%s bytes=%s", model, voice, out.stat().st_size)
+            return out
+        last_err = "write failed"
+
+    logger.warning("TTS 全部组合失败 last=%s text=%s", last_err[:200], text[:40])
+    return None
+
+
+def _extract_audio_bytes(audio: object) -> bytes | None:
+    if isinstance(audio, (bytes, bytearray)):
+        return bytes(audio)
+    if hasattr(audio, "get_audio_data"):
+        try:
+            data = audio.get_audio_data()
+            if isinstance(data, (bytes, bytearray)):
+                return bytes(data)
         except Exception:  # noqa: BLE001
-            raw = None
-    if raw is None and isinstance(audio, str) and Path(audio).is_file():
-        # 少数版本返回临时路径
-        data = Path(audio).read_bytes()
-        output_path.write_bytes(data)
-        return output_path if output_path.is_file() else None
-
-    if not raw:
-        logger.warning("TTS 无法解析音频数据 type=%s", type(audio))
-        return None
-
-    out = output_path if output_path.suffix.lower() == ".wav" else output_path.with_suffix(".wav")
-    out.write_bytes(bytes(raw))
-    if not out.is_file() or out.stat().st_size < 64:
-        logger.warning("TTS 写入失败或过小: %s", out)
-        return None
-    return out
+            pass
+    if isinstance(audio, str) and Path(audio).is_file():
+        return Path(audio).read_bytes()
+    return None
 
 
 def probe_wav_duration_sec(path: Path) -> float | None:

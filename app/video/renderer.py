@@ -256,7 +256,7 @@ def _try_ffmpeg(
             "\n".join(f"file '{p.name}'" for p in parts) + "\n",
             encoding="utf-8",
         )
-        # 有音频时需统一重编码，避免 concat copy 丢轨
+        # 统一重编码，避免 copy 时因分辨率/时间基不一致失败
         concat_cmd = [
             ffmpeg,
             "-y",
@@ -266,22 +266,16 @@ def _try_ffmpeg(
             "0",
             "-i",
             str(list_file),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
         ]
         if has_audio:
-            concat_cmd.extend(
-                [
-                    "-c:v",
-                    "libx264",
-                    "-pix_fmt",
-                    "yuv420p",
-                    "-c:a",
-                    "aac",
-                    "-shortest",
-                    str(output_path),
-                ]
-            )
+            concat_cmd.extend(["-c:a", "aac", "-shortest"])
         else:
-            concat_cmd.extend(["-c", "copy", str(output_path)])
+            concat_cmd.append("-an")
+        concat_cmd.append(str(output_path))
 
         proc = subprocess.run(
             concat_cmd,

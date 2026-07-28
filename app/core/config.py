@@ -74,8 +74,8 @@ class Settings(BaseSettings):
     video_max_concurrent: int = 1
     # TTS：默认开启；无 API Key / SDK 失败时自动降级为静音片
     video_tts_enabled: bool = True
-    video_tts_model: str = "cosyvoice-v3-flash"
-    video_tts_voice: str = "longxiaochun"
+    video_tts_model: str = "cosyvoice-v2"
+    video_tts_voice: str = "longxiaochun_v2"
     # 可选：渲染后额外拷贝到 Nginx 静态目录（一般不必，nginx 已反代 uvicorn）
     video_cdn_mirror_dir: str = ""
 
