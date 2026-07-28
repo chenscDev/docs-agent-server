@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -153,6 +154,25 @@ def run_job_pipeline(job_id: str) -> None:
             db.refresh(job)
             return bool(job.cancel_requested) or job.status == "cancelled"
 
+        def public_url(rel_or_name: str) -> str:
+            name = Path(rel_or_name).name
+            rel = f"/cdn/video/{name}"
+            base = (settings.video_public_base_url or "").rstrip("/")
+            return f"{base}{rel}" if base else rel
+
+        def mirror_file(src: Path) -> None:
+            mirror = (settings.video_cdn_mirror_dir or "").strip()
+            if not mirror or not src.is_file():
+                return
+            dest_dir = Path(mirror)
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / src.name
+                if dest.resolve() != src.resolve():
+                    shutil.copyfile(src, dest)
+            except OSError as exc:
+                logger.warning("镜像 CDN 文件失败: %s", exc)
+
         try:
             # 1) 分镜
             if not job.storyboard_json:
@@ -196,11 +216,11 @@ def run_job_pipeline(job_id: str) -> None:
             # 2) 渲染
             job.status = "rendering"
             job.progress = 0.5
-            job.stage_message = "渲染中（Remotion/FFmpeg）…"
+            job.stage_message = "渲染中（画面 + 配音）…"
             db.commit()
 
             out_file = out_dir / f"{job.id}_v{job.version}.mp4"
-            render_storyboard_to_mp4(
+            render = render_storyboard_to_mp4(
                 board,
                 output_path=out_file,
                 job_id=job.id,
@@ -212,17 +232,39 @@ def run_job_pipeline(job_id: str) -> None:
                 db.commit()
                 return
 
-            public_base = (settings.video_public_base_url or "").rstrip("/")
-            rel = f"/cdn/video/{out_file.name}"
-            job.output_path = str(out_file)
-            job.output_url = f"{public_base}{rel}" if public_base else rel
+            # 回写分镜缩略图 URL
+            for scene in board.scenes:
+                thumb = render.scene_thumbs.get(scene.id)
+                if thumb is not None and thumb.is_file():
+                    scene.thumbUrl = public_url(thumb.name)
+                    mirror_file(thumb)
+
+            job.storyboard_json = json.dumps(
+                board.to_public_dict(),
+                ensure_ascii=False,
+            )
+            job.output_path = str(render.output_path)
+            job.output_url = public_url(render.output_path.name)
+            mirror_file(render.output_path)
+
+            if render.cover_path is not None and render.cover_path.is_file():
+                job.cover_url = public_url(render.cover_path.name)
+                mirror_file(render.cover_path)
+
+            job.duration_sec = board.total_duration_sec
             job.status = "ready"
             job.progress = 1.0
-            job.stage_message = "渲染完成"
+            audio_hint = "含配音" if render.has_audio else "静音片（TTS 未启用或失败）"
+            job.stage_message = f"渲染完成（{audio_hint}）"
             job.error_code = None
             job.error_message = None
             db.commit()
-            logger.info("video job ready id=%s url=%s", job.id, job.output_url)
+            logger.info(
+                "video job ready id=%s url=%s audio=%s",
+                job.id,
+                job.output_url,
+                render.has_audio,
+            )
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             if msg == "CANCELLED" or cancelled():

@@ -21,6 +21,8 @@ class Scene(BaseModel):
     visualHint: str = Field("", max_length=120)
     bgColor: str = Field("#0F172A", pattern=r"^#[0-9A-Fa-f]{6}$")
     accentColor: str = Field("#38BDF8", pattern=r"^#[0-9A-Fa-f]{6}$")
+    # 渲染后写入：分镜缩略图相对/绝对 URL
+    thumbUrl: str = Field("", max_length=500)
 
 
 class Storyboard(BaseModel):

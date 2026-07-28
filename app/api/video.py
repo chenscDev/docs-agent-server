@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -306,4 +306,45 @@ def video_meta() -> dict[str, Any]:
         "remotionProject": settings.remotion_project_dir,
         "templates": len(TEMPLATE_CATALOG),
         "cdnPath": "/cdn/video/",
+        "ttsEnabled": settings.video_tts_enabled,
     }
+
+
+@router.get("/player/{job_id}", response_class=HTMLResponse)
+def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLResponse:
+    """免鉴权 HTML5 播放页（App 内 Linking 打开即可看片+听声）。"""
+    job = get_job(db, job_id)
+    if job is None or not job.output_url:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在或尚未成片")
+    settings = get_settings()
+    base = (settings.video_public_base_url or "").rstrip("/")
+    url = job.output_url
+    if url.startswith("/") and base:
+        url = f"{base}{url}"
+    elif url.startswith("/"):
+        # 相对路径：浏览器同 Host 访问即可
+        pass
+    title = (job.title or "AI 短视频").replace("<", "").replace(">", "")
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>{title}</title>
+  <style>
+    body {{ margin:0; background:#0B1220; color:#E2E8F0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }}
+    .wrap {{ max-width:480px; margin:0 auto; padding:16px; }}
+    h1 {{ font-size:18px; margin:0 0 12px; }}
+    video {{ width:100%; border-radius:12px; background:#000; }}
+    .meta {{ margin-top:10px; font-size:13px; color:#94A3B8; word-break:break-all; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>{title}</h1>
+    <video controls autoplay playsinline src="{url}"></video>
+    <p class="meta">{url}</p>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)

@@ -12,7 +12,9 @@ RN home 分包  --SSE-->  /v1/video/plan/stream | /creative/stream
 docs-agent-server
   app/video/          分镜 Schema / 规划 / 队列 / 渲染
   video-renderer/     Remotion 模板（可选）
-  data/video_out/     MP4 → 挂载 /cdn/video/
+  data/video_out/     MP4 + 封面/分镜 JPG → 挂载 /cdn/video/（免鉴权）
+  TTS：DashScope CosyVoice（失败自动静音）
+  Nginx：/cdn/video/ 反代到 uvicorn，避免双目录 404
 docs-agent 分包       问答不变；可提示用户切到业务 Home 创作
 ```
 

@@ -22,6 +22,15 @@ logger = logging.getLogger("docs_agent.auth")
 
 # 探活放行；其余（含 /docs、/debug、/v1/*）均需 Token（若已配置）
 _PUBLIC_PATHS = frozenset({"/health"})
+# 成片 / 封面 / 分镜缩略图：系统播放器与 <Image> 无法带 Bearer
+# HTML 播放页同样免鉴权，便于 App Linking 打开
+_PUBLIC_PREFIXES = ("/cdn/video", "/v1/video/player")
+
+
+def _is_public_path(path: str) -> bool:
+    if path in _PUBLIC_PATHS:
+        return True
+    return any(path == p or path.startswith(f"{p}/") for p in _PUBLIC_PREFIXES)
 
 
 def _extract_bearer(authorization: str | None) -> str | None:
@@ -39,7 +48,7 @@ class ApiTokenAuthMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
-        if path in _PUBLIC_PATHS:
+        if _is_public_path(path):
             return await call_next(request)
 
         if not auth_enabled():
