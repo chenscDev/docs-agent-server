@@ -347,9 +347,9 @@ def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLRespons
   <style>
     body {{ margin:0; background:#0B1220; color:#E2E8F0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }}
     .wrap {{ max-width:480px; margin:0 auto; padding:16px; }}
-    h1 {{ font-size:18px; margin:0 0 12px; }}
-    .cover {{ width:100%; border-radius:12px; margin-bottom:12px; display:block; background:#111; }}
-    video {{ width:100%; border-radius:12px; background:#000; }}
+    h1 {{ font-size:18px; margin:12px 0 8px; }}
+    /* 视频置顶全宽，封面仅作 poster，避免上方静态图 + 下方视频双层堆叠 */
+    video {{ width:100%; max-height:80vh; border-radius:12px; background:#000; display:block; }}
     .meta {{ margin-top:10px; font-size:13px; color:#94A3B8; word-break:break-all; }}
     .share {{ margin-top:14px; display:flex; gap:8px; }}
     .share a {{ flex:1; text-align:center; padding:10px; border-radius:10px; background:#0284C7; color:#fff; text-decoration:none; font-weight:700; }}
@@ -357,9 +357,8 @@ def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLRespons
 </head>
 <body>
   <div class="wrap">
+    <video controls autoplay playsinline webkit-playsinline poster="{cover}" src="{url}"></video>
     <h1>{title}</h1>
-    {f'<img class="cover" src="{cover}" alt="cover" />' if cover else ''}
-    <video controls autoplay playsinline poster="{cover}" src="{url}"></video>
     <p class="meta">{url}</p>
     <div class="share">
       <a href="{url}" download>下载成片</a>

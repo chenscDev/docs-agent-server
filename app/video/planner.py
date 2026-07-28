@@ -54,13 +54,39 @@ def plan_storyboard(
     )
 
 
+def _looks_like_refine_command(instruction: str) -> bool:
+    """判断是否为「改写指令」而非「直接给出的新文案」。"""
+    command_hints = (
+        "一点",
+        "一下",
+        "一些",
+        "更",
+        "再",
+        "请",
+        "帮",
+        "改成",
+        "改为",
+        "调整",
+        "优化",
+        "口语",
+        "精简",
+        "缩短",
+        "加长",
+        "详细",
+        "展开",
+        "压缩",
+        "简洁",
+    )
+    return any(h in instruction for h in command_hints) and len(instruction) < 48
+
+
 def refine_scene(
     storyboard: Storyboard,
     *,
     scene_id: str,
     instruction: str,
 ) -> Storyboard:
-    """按自然语言局部修改某一镜。"""
+    """按自然语言局部修改某一镜（默认改正文/口播，不覆盖标题）。"""
     instruction = (instruction or "").strip()
     if not instruction:
         return storyboard
@@ -70,22 +96,63 @@ def refine_scene(
         if scene.id != scene_id:
             scenes.append(scene)
             continue
-        # 简单规则：缩短/改写 headline；复杂指令可再走 LLM
         headline = scene.headline
-        body = scene.body
-        if "短" in instruction or "精简" in instruction:
-            headline = headline[:18] + ("…" if len(headline) > 18 else "")
-            body = body[:40]
-        elif "长" in instruction:
-            body = (body + " " + instruction).strip()[:200]
+        body = scene.body or ""
+        visual_hint = scene.visualHint or ""
+        wants_short = any(k in instruction for k in ("短", "精简", "压缩", "简洁", "缩短"))
+        wants_long = any(k in instruction for k in ("长", "详细", "展开", "丰富", "加长"))
+        wants_title = any(k in instruction for k in ("标题", "主句", "headline"))
+        wants_visual = any(k in instruction for k in ("画面", "视觉", "镜头感"))
+
+        if wants_title and not wants_short and not wants_long:
+            # 显式改标题：去掉提示词后写入 headline
+            refined = instruction
+            for token in ("标题", "主句", "改成", "改为", "改一下", "改成：", "改为："):
+                refined = refined.replace(token, " ")
+            refined = " ".join(refined.split()).strip(" ：:，,")
+            if refined:
+                headline = refined[:80]
+        elif wants_visual and not wants_short and not wants_long:
+            visual_hint = instruction[:120]
+        elif wants_short:
+            # 「字幕/正文短一点」优先压正文；标题仅在偏长时截断
+            if "标题" in instruction and len(headline) > 12:
+                headline = headline[:12] + "…"
+            elif len(headline) > 24:
+                headline = headline[:18] + "…"
+            if body:
+                # 相对缩短：至少砍到约 60%，且不超过硬上限
+                hard = 24 if ("精简" in instruction or "压缩" in instruction) else 32
+                target = min(hard, max(12, int(len(body) * 0.6)))
+                if len(body) > target:
+                    body = body[:target] + "…"
+        elif wants_long:
+            # 加长：把指令里的补充内容并入正文，不替换标题
+            suffix = instruction
+            for token in ("长一点", "详细一点", "展开", "更丰富", "加长", "长一些"):
+                suffix = suffix.replace(token, "")
+            suffix = suffix.strip(" ：:，,")
+            body = (body + (" " + suffix if suffix else " " + instruction)).strip()[:200]
+        elif _looks_like_refine_command(instruction):
+            # 命令型（如「更口语化」）：只做轻量规则，绝不把指令本身写成标题
+            if "口语" in instruction and body:
+                body = body.replace("，", " ").replace("。", " ").strip()[:200]
+            if wants_short:
+                body = body[:40]
         else:
-            # 把指令当作新字幕主体
-            headline = instruction[:80] if len(instruction) <= 80 else instruction[:77] + "…"
+            # 内容型：用户直接给出新口播/正文 → 写入 body，保留原标题
+            refined = instruction
+            for prefix in ("改成", "改为", "改成：", "改为：", "改成:", "改为:"):
+                if refined.startswith(prefix):
+                    refined = refined[len(prefix) :].strip()
+                    break
+            body = (refined or instruction)[:200]
         scenes.append(
             scene.model_copy(
                 update={
                     "headline": headline,
                     "body": body,
+                    "visualHint": visual_hint,
                 }
             )
         )
