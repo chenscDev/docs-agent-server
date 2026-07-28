@@ -36,6 +36,10 @@ class Storyboard(BaseModel):
     fps: int = Field(30, ge=24, le=60)
     scenes: list[Scene] = Field(..., min_length=1, max_length=12)
     brandNotes: str = Field("", max_length=500)
+    # 渲染选项（客户端可改；缺省走服务端配置）
+    speechRate: float = Field(1.0, ge=0.5, le=2.0)
+    bgmEnabled: bool = True
+    bgmVolume: float = Field(0.18, ge=0.0, le=1.0)
 
     @field_validator("scenes")
     @classmethod

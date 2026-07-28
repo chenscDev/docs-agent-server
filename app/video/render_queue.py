@@ -91,6 +91,33 @@ def _submit_locked(job_id: str) -> None:
     def _run() -> None:
         try:
             run_job_pipeline(job_id)
+            # 失败自动再试一次（弱网 / 瞬时 ffmpeg 错误）
+            db_session.get_engine()
+            assert db_session.SessionLocal is not None
+            with db_session.SessionLocal() as db:
+                job = db.get(VideoJob, job_id)
+                if (
+                    job is not None
+                    and job.status == "failed"
+                    and not job.cancel_requested
+                    and (job.error_code or "") == "RENDER_FAILED"
+                    and "auto-retry" not in (job.stage_message or "")
+                ):
+                    job.status = "pending"
+                    job.progress = 0.0
+                    job.error_code = None
+                    job.error_message = None
+                    job.stage_message = "渲染失败，自动重试中…"
+                    db.commit()
+                    logger.warning("video auto-retry id=%s", job_id)
+                    run_job_pipeline(job_id)
+                    with db_session.SessionLocal() as db2:
+                        job2 = db2.get(VideoJob, job_id)
+                        if job2 is not None and job2.status == "failed":
+                            job2.stage_message = (
+                                (job2.stage_message or "渲染失败") + "（已 auto-retry）"
+                            )
+                            db2.commit()
         finally:
             with _lock:
                 _queued_or_running.discard(job_id)

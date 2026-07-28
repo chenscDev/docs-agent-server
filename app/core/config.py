@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     video_tts_enabled: bool = True
     video_tts_model: str = "cosyvoice-v2"
     video_tts_voice: str = "longxiaochun_v2"
+    video_tts_speech_rate: float = 1.0  # 0.5～2.0
+    video_tts_volume: int = 50  # 0～100
+    # BGM：无外部文件时用 lavfi 生成轻氛围底噪并混入
+    video_bgm_enabled: bool = True
+    video_bgm_volume: float = 0.16
+    video_bgm_file: str = ""  # 可选本地 mp3/wav；空则合成粉噪氛围
     # 可选：渲染后额外拷贝到 Nginx 静态目录（一般不必，nginx 已反代 uvicorn）
     video_cdn_mirror_dir: str = ""
 

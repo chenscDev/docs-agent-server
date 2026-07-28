@@ -331,25 +331,39 @@ def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLRespons
         # 相对路径：浏览器同 Host 访问即可
         pass
     title = (job.title or "AI 短视频").replace("<", "").replace(">", "")
+    cover = job.cover_url or ""
+    if cover.startswith("/") and base:
+        cover = f"{base}{cover}"
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta property="og:title" content="{title}" />
+  <meta property="og:type" content="video.other" />
+  <meta property="og:video" content="{url}" />
+  {f'<meta property="og:image" content="{cover}" />' if cover else ''}
   <title>{title}</title>
   <style>
     body {{ margin:0; background:#0B1220; color:#E2E8F0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }}
     .wrap {{ max-width:480px; margin:0 auto; padding:16px; }}
     h1 {{ font-size:18px; margin:0 0 12px; }}
+    .cover {{ width:100%; border-radius:12px; margin-bottom:12px; display:block; background:#111; }}
     video {{ width:100%; border-radius:12px; background:#000; }}
     .meta {{ margin-top:10px; font-size:13px; color:#94A3B8; word-break:break-all; }}
+    .share {{ margin-top:14px; display:flex; gap:8px; }}
+    .share a {{ flex:1; text-align:center; padding:10px; border-radius:10px; background:#0284C7; color:#fff; text-decoration:none; font-weight:700; }}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>{title}</h1>
-    <video controls autoplay playsinline src="{url}"></video>
+    {f'<img class="cover" src="{cover}" alt="cover" />' if cover else ''}
+    <video controls autoplay playsinline poster="{cover}" src="{url}"></video>
     <p class="meta">{url}</p>
+    <div class="share">
+      <a href="{url}" download>下载成片</a>
+    </div>
   </div>
 </body>
 </html>"""

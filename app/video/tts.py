@@ -28,7 +28,13 @@ def scene_narration_text(*, headline: str, body: str = "") -> str:
     return text[:200] if text else ""
 
 
-def synthesize_to_file(text: str, output_path: Path) -> Path | None:
+def synthesize_to_file(
+    text: str,
+    output_path: Path,
+    *,
+    speech_rate: float | None = None,
+    volume: int | None = None,
+) -> Path | None:
     """
     合成语音到 output_path（wav）。
     成功返回路径；关闭 TTS / 无 Key / 调用失败返回 None。
@@ -66,6 +72,11 @@ def synthesize_to_file(text: str, output_path: Path) -> Path | None:
         if item not in combos:
             combos.append(item)
 
+    rate = speech_rate if speech_rate is not None else settings.video_tts_speech_rate
+    rate = max(0.5, min(2.0, float(rate or 1.0)))
+    vol = volume if volume is not None else settings.video_tts_volume
+    vol = max(0, min(100, int(vol or 50)))
+
     last_err = ""
     for model, voice in combos:
         try:
@@ -73,6 +84,8 @@ def synthesize_to_file(text: str, output_path: Path) -> Path | None:
                 model=model,
                 voice=voice,
                 format=AudioFormat.WAV_16000HZ_MONO_16BIT,
+                speech_rate=rate,
+                volume=vol,
             )
             audio = synthesizer.call(text)
         except Exception as exc:  # noqa: BLE001
