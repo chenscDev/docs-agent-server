@@ -100,11 +100,25 @@ def patch_storyboard(
     *,
     patches: dict[str, Any],
 ) -> Storyboard:
-    """浅合并 patch（title/templateId/scenes 等）。"""
+    """浅合并 patch；scenes 支持整表替换或按 id 合并字段。"""
     data = storyboard.model_dump()
     for key, value in patches.items():
         if key == "scenes" and isinstance(value, list):
-            data["scenes"] = value
+            if value and all(isinstance(x, dict) and x.get("id") for x in value):
+                # 若提交了完整镜头列表（含 index），整表替换；否则按 id 合并
+                if all("index" in x and "headline" in x for x in value):
+                    data["scenes"] = value
+                else:
+                    by_id = {s["id"]: s for s in data["scenes"]}
+                    for item in value:
+                        sid = str(item["id"])
+                        if sid in by_id:
+                            by_id[sid] = {**by_id[sid], **item}
+                        else:
+                            data["scenes"].append(item)
+                    data["scenes"] = list(by_id.values())
+            else:
+                data["scenes"] = value
         elif key in data and key != "version":
             data[key] = value
     data["version"] = int(data.get("version") or 1) + 1

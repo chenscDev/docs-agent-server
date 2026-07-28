@@ -114,6 +114,11 @@ def request_job_cancel(db: Session, job_id: str) -> VideoJob | None:
     return job
 
 
+def resolve_knowledge_hint(db: Session, knowledge_base_id: str | None) -> str:
+    """供 API / pipeline 复用：从知识库抽若干 chunk 作为创作约束。"""
+    return _kb_hint(db, knowledge_base_id)
+
+
 def _kb_hint(db: Session, knowledge_base_id: str | None) -> str:
     """可选：从 KB 取若干 chunk 作品牌约束（轻量，不跑完整 Agent）。"""
     if not knowledge_base_id:
@@ -293,10 +298,10 @@ def remix_job(
     if not parent.storyboard_json:
         raise ValueError("父任务尚无分镜，无法 Remix")
     board = validate_storyboard(json.loads(parent.storyboard_json))
-    if scene_id and instruction:
-        board = refine_scene(board, scene_id=scene_id, instruction=instruction)
     if patches:
         board = patch_storyboard(board, patches=patches)
+    if scene_id and instruction:
+        board = refine_scene(board, scene_id=scene_id, instruction=instruction)
     prompt = (new_prompt or parent.prompt).strip()
     child = create_job(
         db,

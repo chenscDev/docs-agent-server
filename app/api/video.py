@@ -49,6 +49,7 @@ class PlanBody(BaseModel):
     template_id: TemplateId = Field(default="talking-captions", alias="templateId")
     brand_notes: str = Field(default="", alias="brandNotes")
     knowledge_hint: str = Field(default="", alias="knowledgeHint")
+    knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -266,15 +267,20 @@ def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
 
 
 @router.post("/plan/stream")
-def plan_stream(body: PlanBody) -> StreamingResponse:
+def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingResponse:
     """流式分镜规划（不落库；确认后再 POST /jobs）。"""
+    from app.video.service import resolve_knowledge_hint
+
+    hint = (body.knowledge_hint or "").strip()
+    if not hint and body.knowledge_base_id:
+        hint = resolve_knowledge_hint(db, body.knowledge_base_id)
 
     def gen() -> Iterator[str]:
         yield from iter_creative_plan_sse(
             prompt=body.prompt,
             template_id=body.template_id,
             brand_notes=body.brand_notes,
-            knowledge_hint=body.knowledge_hint,
+            knowledge_hint=hint,
         )
 
     return StreamingResponse(gen(), media_type="text/event-stream")
