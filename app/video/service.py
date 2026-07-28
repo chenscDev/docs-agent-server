@@ -221,8 +221,20 @@ def run_job_pipeline(job_id: str) -> None:
             # 2) 渲染
             job.status = "rendering"
             job.progress = 0.5
-            job.stage_message = "渲染中（画面 + 配音）…"
+            job.stage_message = "开始渲染成片…"
             db.commit()
+
+            def report_render(message: str, progress: float) -> None:
+                """渲染过程中刷新进度，供 SSE / 轮询展示。"""
+                if cancelled():
+                    return
+                job.progress = float(progress)
+                job.stage_message = (message or "")[:500]
+                try:
+                    db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("写入渲染进度失败: %s", exc)
+                    db.rollback()
 
             out_file = out_dir / f"{job.id}_v{job.version}.mp4"
             render = render_storyboard_to_mp4(
@@ -230,6 +242,7 @@ def run_job_pipeline(job_id: str) -> None:
                 output_path=out_file,
                 job_id=job.id,
                 cancel_check=cancelled,
+                on_progress=report_render,
             )
 
             if cancelled():

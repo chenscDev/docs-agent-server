@@ -7,6 +7,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from app.video.tts import (
 )
 
 logger = logging.getLogger(__name__)
+
+# message, progress(0~1)
+ProgressCallback = Callable[[str, float], None]
 
 
 @dataclass
@@ -37,6 +41,7 @@ def render_storyboard_to_mp4(
     output_path: Path,
     job_id: str,
     cancel_check=None,
+    on_progress: ProgressCallback | None = None,
 ) -> RenderResult:
     """
     渲染分镜为 MP4，并尽量生成封面/分镜缩略图与配音。
@@ -46,6 +51,13 @@ def render_storyboard_to_mp4(
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    def report(message: str, progress: float) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(message, max(0.0, min(0.99, progress)))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("on_progress 回调失败: %s", exc)
+
     if cancel_check and cancel_check():
         raise RuntimeError("CANCELLED")
 
@@ -53,17 +65,29 @@ def render_storyboard_to_mp4(
     mode = (settings.video_renderer or "auto").strip().lower()
     result: RenderResult | None = None
 
+    report("准备渲染引擎…", 0.50)
+
     if mode in ("remotion", "auto"):
+        report("尝试 Remotion 高质量渲染…", 0.52)
         result = _try_remotion(storyboard, output_path, job_id=job_id)
         if result is None and mode == "remotion":
             raise RuntimeError("Remotion 渲染失败且 VIDEO_RENDERER=remotion")
+        if result is not None:
+            report("Remotion 成片完成，后处理中…", 0.88)
 
     if result is None and mode in ("ffmpeg", "auto"):
-        result = _try_ffmpeg(storyboard, output_path, cancel_check=cancel_check)
+        report("使用 FFmpeg 逐镜合成画面与配音…", 0.54)
+        result = _try_ffmpeg(
+            storyboard,
+            output_path,
+            cancel_check=cancel_check,
+            on_progress=on_progress,
+        )
         if result is None and mode == "ffmpeg":
             logger.warning("FFmpeg 主路径失败，尝试纯色兜底")
 
     if result is None:
+        report("主路径失败，使用纯色兜底渲染…", 0.56)
         result = _try_ffmpeg_solid(storyboard, output_path)
     if result is None:
         raise RuntimeError(
@@ -72,12 +96,14 @@ def render_storyboard_to_mp4(
 
     # Remotion / 纯色兜底后：尝试整片配音 + 抽帧缩略图
     if not result.has_audio:
+        report("为成片合成旁白配音…", 0.90)
         voiced = _try_attach_full_narration(storyboard, result.output_path)
         if voiced:
             result.has_audio = True
             result.output_path = voiced
 
     if not result.scene_thumbs:
+        report("抽取分镜缩略图…", 0.93)
         result.scene_thumbs = _extract_scene_thumbs_from_mp4(
             storyboard,
             result.output_path,
@@ -94,6 +120,7 @@ def render_storyboard_to_mp4(
             except OSError as exc:
                 logger.warning("复制封面失败: %s", exc)
     if result.cover_path is None:
+        report("生成封面图…", 0.95)
         cover = _extract_single_thumb(
             result.output_path,
             output_path.parent / f"{job_id}_v{storyboard.version}_cover.jpg",
@@ -101,11 +128,13 @@ def render_storyboard_to_mp4(
         result.cover_path = cover
 
     # 混入 BGM（失败不阻断）
+    report("混入背景音乐…", 0.97)
     mixed = _try_mix_bgm(storyboard, result.output_path)
     if mixed is not None:
         result.output_path = mixed
         result.has_audio = True
 
+    report("渲染收尾…", 0.99)
     return result
 
 
@@ -209,11 +238,19 @@ def _try_ffmpeg(
     output_path: Path,
     *,
     cancel_check=None,
+    on_progress: ProgressCallback | None = None,
 ) -> RenderResult | None:
     ffmpeg = _ffmpeg_bin()
     if not ffmpeg:
         logger.info("未找到 ffmpeg")
         return None
+
+    def report(message: str, progress: float) -> None:
+        if on_progress is not None:
+            try:
+                on_progress(message, max(0.0, min(0.99, progress)))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("on_progress 回调失败: %s", exc)
 
     w, h = _resolution(storyboard.aspectRatio)
     fps = storyboard.fps
@@ -222,6 +259,7 @@ def _try_ffmpeg(
     thumbs: dict[str, Path] = {}
     has_audio = False
     job_stem = output_path.stem
+    total = max(1, len(storyboard.scenes))
 
     with tempfile.TemporaryDirectory(prefix="ai-video-") as tmp:
         tmp_path = Path(tmp)
@@ -229,6 +267,12 @@ def _try_ffmpeg(
         for scene in storyboard.scenes:
             if cancel_check and cancel_check():
                 raise RuntimeError("CANCELLED")
+            # 画面合成约占 0.55~0.82，配音约占每镜后半
+            base = 0.55 + 0.30 * (scene.index / total)
+            report(
+                f"绘制画面 {scene.index + 1}/{total}：{scene.headline[:24]}",
+                base,
+            )
             part = tmp_path / f"{scene.index:02d}.mp4"
             if not _render_scene_clip(
                 ffmpeg,
@@ -249,6 +293,10 @@ def _try_ffmpeg(
                 thumbs[scene.id] = thumb
 
             # 单镜 TTS 配音
+            report(
+                f"生成配音 {scene.index + 1}/{total}…",
+                base + 0.30 / total * 0.5,
+            )
             voiced = _mux_scene_tts(
                 ffmpeg,
                 scene=scene,
@@ -264,6 +312,7 @@ def _try_ffmpeg(
         if not parts:
             return None
 
+        report("拼接全部分镜成片…", 0.88)
         list_file = tmp_path / "list.txt"
         list_file.write_text(
             "\n".join(f"file '{p.name}'" for p in parts) + "\n",

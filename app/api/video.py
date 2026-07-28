@@ -208,15 +208,22 @@ def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
         seq = 0
         last_status = ""
         last_progress = -1.0
+        last_stage = ""
         # 最长跟 10 分钟
         deadline = time.time() + 600
         while time.time() < deadline:
             db.refresh(job)
-            changed = job.status != last_status or (job.progress or 0) != last_progress
+            stage = job.stage_message or ""
+            changed = (
+                job.status != last_status
+                or (job.progress or 0) != last_progress
+                or stage != last_stage
+            )
             if changed:
                 seq += 1
                 last_status = job.status
                 last_progress = float(job.progress or 0)
+                last_stage = stage
                 yield format_sse(
                     make_video_event(
                         job_id=job.id,
@@ -250,7 +257,7 @@ def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
                     )
                 )
                 return
-            time.sleep(0.6)
+            time.sleep(0.35)
 
         seq += 1
         yield format_sse(
