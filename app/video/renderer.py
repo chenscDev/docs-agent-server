@@ -146,6 +146,10 @@ def _try_remotion(
     if not root.is_dir():
         logger.info("Remotion 项目不存在: %s", root)
         return None
+    # 缺 tsconfig 时 Remotion CLI 会直接失败并刷屏，提前跳过走 FFmpeg
+    if not (root / "tsconfig.json").is_file():
+        logger.info("Remotion 缺少 tsconfig.json，跳过: %s", root)
+        return None
     npx = shutil.which("npx")
     if not npx:
         logger.info("未找到 npx，跳过 Remotion")
@@ -318,8 +322,8 @@ def _try_ffmpeg(
             "\n".join(f"file '{p.name}'" for p in parts) + "\n",
             encoding="utf-8",
         )
-        # 统一重编码，避免 copy 时因分辨率/时间基不一致失败
-        concat_cmd = [
+        # 优先 stream copy（镜头已是统一 libx264/aac），降低 1.5G 机器在配音后的内存尖峰
+        concat_copy = [
             ffmpeg,
             "-y",
             "-f",
@@ -328,29 +332,72 @@ def _try_ffmpeg(
             "0",
             "-i",
             str(list_file),
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
+            "-c",
+            "copy",
+            str(output_path),
         ]
-        if has_audio:
-            concat_cmd.extend(["-c:a", "aac", "-shortest"])
-        else:
-            concat_cmd.append("-an")
-        concat_cmd.append(str(output_path))
-
+        if not has_audio:
+            concat_copy = [
+                ffmpeg,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_file),
+                "-c:v",
+                "copy",
+                "-an",
+                str(output_path),
+            ]
         proc = subprocess.run(
-            concat_cmd,
+            concat_copy,
             cwd=str(tmp_path),
             capture_output=True,
             text=True,
             check=False,
         )
         if proc.returncode != 0 or not output_path.is_file():
-            logger.warning("ffmpeg concat failed: %s", (proc.stderr or "")[-800:])
-            return None
+            logger.warning(
+                "ffmpeg concat copy 失败，回退重编码: %s",
+                (proc.stderr or "")[-400:],
+            )
+            if output_path.is_file():
+                output_path.unlink(missing_ok=True)
+            concat_cmd = [
+                ffmpeg,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_file),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+            ]
+            if has_audio:
+                concat_cmd.extend(["-c:a", "aac", "-shortest"])
+            else:
+                concat_cmd.append("-an")
+            concat_cmd.append(str(output_path))
+            proc = subprocess.run(
+                concat_cmd,
+                cwd=str(tmp_path),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0 or not output_path.is_file():
+                logger.warning(
+                    "ffmpeg concat failed: %s", (proc.stderr or "")[-800:]
+                )
+                return None
 
-        cover = None
+        report("拼接完成，生成封面与背景音乐…", 0.92)
         if storyboard.scenes and storyboard.scenes[0].id in thumbs:
             cover_path = output_path.parent / f"{job_stem}_cover.jpg"
             try:

@@ -12,14 +12,17 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+# 演示机为 root 部署；有独立业务用户时改为对应账号
+User=root
+Group=root
 WorkingDirectory=/opt/docs-agent-server
 Environment=PATH=/opt/docs-agent-server/.venv/bin:/usr/bin
 EnvironmentFile=/opt/docs-agent-server/.env
 ExecStart=/opt/docs-agent-server/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=on-failure
 RestartSec=5
+# 给当前渲染留出收尾时间（配音后拼接 / 混 BGM），避免 SIGTERM 立刻掐断导致客户端 502
+TimeoutStopSec=180
 # 2G 机器避免无节制吃内存
 MemoryMax=1500M
 

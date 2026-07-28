@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +17,7 @@ from app.agent.cancel_registry import request_cancel
 from app.core.config import get_settings
 from app.core.errors import raise_api_error
 from app.core.ids import new_id
+from app.db.models import VideoJob
 from app.db.session import get_db
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
@@ -213,15 +214,18 @@ def cancel_video(body: CancelJobBody, db: Session = Depends(get_db)) -> dict[str
 
 
 @router.get("/jobs/{job_id}/events")
-def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
+async def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
     """任务进度 SSE；断线后可轮询 GET /jobs/{id}。"""
+    import asyncio
+
     job = get_job(db, job_id)
     if job is None:
         raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
 
     stream_id = new_id("vjobstream")
+    job_id_fixed = job.id
 
-    def gen() -> Iterator[str]:
+    async def gen() -> AsyncIterator[str]:
         seq = 0
         last_status = ""
         last_progress = -1.0
@@ -229,57 +233,78 @@ def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
         # 最长跟 10 分钟
         deadline = time.time() + 600
         while time.time() < deadline:
-            db.refresh(job)
-            stage = job.stage_message or ""
-            changed = (
-                job.status != last_status
-                or (job.progress or 0) != last_progress
-                or stage != last_stage
-            )
-            if changed:
-                seq += 1
-                last_status = job.status
-                last_progress = float(job.progress or 0)
-                last_stage = stage
-                yield format_sse(
-                    make_video_event(
-                        job_id=job.id,
-                        stream_id=stream_id,
-                        seq=seq,
-                        event_type="job_progress",
-                        payload={
-                            "status": job.status,
-                            "progress": job.progress,
-                            "stageMessage": job.stage_message,
-                            "outputUrl": job.output_url,
-                            "errorCode": job.error_code,
-                            "errorMessage": job.error_message,
-                            "storyboard": (
-                                json.loads(job.storyboard_json)
-                                if job.storyboard_json
-                                else None
-                            ),
-                        },
+            # 每次开新 session，避免长连接占着 SQLite 锁拖垮其它请求
+            from app.db.session import SessionLocal, get_engine
+
+            get_engine()
+            assert SessionLocal is not None
+            with SessionLocal() as s:
+                row = s.get(VideoJob, job_id_fixed)
+                if row is None:
+                    seq += 1
+                    yield format_sse(
+                        make_video_event(
+                            job_id=job_id_fixed,
+                            stream_id=stream_id,
+                            seq=seq,
+                            event_type="error",
+                            payload={
+                                "code": "NOT_FOUND",
+                                "message": "视频任务不存在",
+                            },
+                        )
                     )
+                    return
+                stage = row.stage_message or ""
+                changed = (
+                    row.status != last_status
+                    or (row.progress or 0) != last_progress
+                    or stage != last_stage
                 )
-            if job.status in ("ready", "failed", "cancelled"):
-                seq += 1
-                yield format_sse(
-                    make_video_event(
-                        job_id=job.id,
-                        stream_id=stream_id,
-                        seq=seq,
-                        event_type="done",
-                        payload=job_to_dict(job),
+                if changed:
+                    seq += 1
+                    last_status = row.status
+                    last_progress = float(row.progress or 0)
+                    last_stage = stage
+                    yield format_sse(
+                        make_video_event(
+                            job_id=row.id,
+                            stream_id=stream_id,
+                            seq=seq,
+                            event_type="job_progress",
+                            payload={
+                                "status": row.status,
+                                "progress": row.progress,
+                                "stageMessage": row.stage_message,
+                                "outputUrl": row.output_url,
+                                "errorCode": row.error_code,
+                                "errorMessage": row.error_message,
+                                "storyboard": (
+                                    json.loads(row.storyboard_json)
+                                    if row.storyboard_json
+                                    else None
+                                ),
+                            },
+                        )
                     )
-                )
-                return
-            time.sleep(0.35)
+                if row.status in ("ready", "failed", "cancelled"):
+                    seq += 1
+                    yield format_sse(
+                        make_video_event(
+                            job_id=row.id,
+                            stream_id=stream_id,
+                            seq=seq,
+                            event_type="done",
+                            payload=job_to_dict(row),
+                        )
+                    )
+                    return
+            await asyncio.sleep(0.35)
 
         seq += 1
         yield format_sse(
             make_video_event(
-                job_id=job.id,
+                job_id=job_id_fixed,
                 stream_id=stream_id,
                 seq=seq,
                 event_type="error",

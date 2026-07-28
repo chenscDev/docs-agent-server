@@ -53,7 +53,8 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        stop_video_queue(wait=False)
+        # 等当前成片尽量跑完再退出，避免部署重启时客户端在配音后拿到 nginx 502
+        stop_video_queue(wait=True, timeout_sec=150.0)
         stop_parse_queue(wait=False)
 
 

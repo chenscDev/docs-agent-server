@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy import select
@@ -51,15 +52,51 @@ def start_video_queue(*, recover: bool = True) -> int:
     return recovered
 
 
-def stop_video_queue(*, wait: bool = False) -> None:
+def video_queue_busy() -> bool:
+    """是否有任务正在渲染 / 排队（供优雅停机判断）。"""
+    with _lock:
+        return bool(_queued_or_running)
+
+
+def stop_video_queue(*, wait: bool = False, timeout_sec: float = 120.0) -> None:
+    """
+    停止队列。
+
+    wait=True 时尽量等当前渲染结束，避免部署重启卡在「配音后拼接」窗口导致客户端 502。
+    """
     global _executor
     with _lock:
         ex = _executor
         _executor = None
-        _queued_or_running.clear()
-    if ex is not None:
+        busy = list(_queued_or_running)
+        # 不清空 busy 标记：worker finally 里仍会 discard；此处仅停止接新任务
+    if ex is None:
+        return
+    if wait and busy:
+        logger.info(
+            "video queue draining jobs=%s timeout=%.0fs",
+            busy,
+            timeout_sec,
+        )
+        deadline = time.time() + max(5.0, float(timeout_sec))
+        while time.time() < deadline:
+            with _lock:
+                still = bool(_queued_or_running)
+            if not still:
+                break
+            time.sleep(0.5)
+        with _lock:
+            left = list(_queued_or_running)
+        if left:
+            logger.warning("video queue drain timeout leftover=%s", left)
+            ex.shutdown(wait=False, cancel_futures=False)
+        else:
+            ex.shutdown(wait=True, cancel_futures=False)
+    else:
         ex.shutdown(wait=wait, cancel_futures=False)
-        logger.info("video queue stopped")
+    with _lock:
+        _queued_or_running.clear()
+    logger.info("video queue stopped")
 
 
 def recover_incomplete_jobs() -> int:
