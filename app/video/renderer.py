@@ -212,6 +212,7 @@ def _try_ffmpeg(
     w, h = _resolution(storyboard.aspectRatio)
     fps = storyboard.fps
     font = _find_font()
+    use_drawtext = _ffmpeg_supports_drawtext(ffmpeg)
     thumbs: dict[str, Path] = {}
     has_audio = False
     job_stem = output_path.stem
@@ -231,6 +232,7 @@ def _try_ffmpeg(
                 height=h,
                 fps=fps,
                 font=font,
+                use_drawtext=use_drawtext,
             ):
                 return None
 
@@ -309,6 +311,84 @@ def _try_ffmpeg(
         )
 
 
+def _ffmpeg_supports_drawtext(ffmpeg: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=15,
+        )
+        return "drawtext" in (proc.stdout or "")
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _make_scene_card_png(
+    scene: Scene,
+    *,
+    width: int,
+    height: int,
+    output: Path,
+) -> Path | None:
+    """用 Pillow 画字幕卡（不依赖 ffmpeg drawtext）。"""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        logger.warning("未安装 Pillow，无法生成字幕卡")
+        return None
+
+    bg = scene.bgColor.lstrip("#")
+    try:
+        rgb = tuple(int(bg[i : i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        rgb = (15, 23, 42)
+
+    img = Image.new("RGB", (width, height), rgb)
+    draw = ImageDraw.Draw(img)
+    font_paths = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    font_large = ImageFont.load_default()
+    font_small = ImageFont.load_default()
+    for fp in font_paths:
+        if Path(fp).is_file():
+            try:
+                font_large = ImageFont.truetype(fp, 48)
+                font_small = ImageFont.truetype(fp, 28)
+                break
+            except OSError:
+                continue
+
+    headline = (scene.headline or "")[:40]
+    body = (scene.body or "")[:60]
+    # 简易居中
+    def _center_text(text: str, font, y: int) -> None:
+        if not text:
+            return
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        x = max(16, (width - tw) // 2)
+        # 半透明底条
+        pad = 18
+        draw.rectangle(
+            [x - pad, y - 8, x + tw + pad, y + (bbox[3] - bbox[1]) + 12],
+            fill=(0, 0, 0),
+        )
+        draw.text((x, y), text, fill=(255, 255, 255), font=font)
+
+    _center_text(headline, font_large, height // 2 - 60)
+    _center_text(body, font_small, height // 2 + 40)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    img.save(output, format="PNG")
+    return output if output.is_file() else None
+
+
 def _render_scene_clip(
     ffmpeg: str,
     *,
@@ -318,8 +398,39 @@ def _render_scene_clip(
     height: int,
     fps: int,
     font: str | None,
+    use_drawtext: bool,
 ) -> bool:
     color = scene.bgColor.lstrip("#")
+    # 优先 Pillow 字幕卡（兼容无 drawtext 的 ffmpeg）
+    card = output.with_suffix(".png")
+    if _make_scene_card_png(scene, width=width, height=height, output=card):
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            str(card),
+            "-t",
+            f"{scene.durationSec}",
+            "-r",
+            str(fps),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            str(output),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        try:
+            card.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if proc.returncode == 0 and output.is_file():
+            return True
+        logger.warning("字幕卡渲染失败，尝试 lavfi: %s", (proc.stderr or "")[-300:])
+
     cmd = [
         ffmpeg,
         "-y",
@@ -328,7 +439,7 @@ def _render_scene_clip(
         "-i",
         f"color=c=0x{color}:s={width}x{height}:d={scene.durationSec}:r={fps}",
     ]
-    if font:
+    if use_drawtext and font:
         headline = _escape_drawtext(scene.headline[:40])
         body = _escape_drawtext((scene.body or "")[:60])
         vf = (
