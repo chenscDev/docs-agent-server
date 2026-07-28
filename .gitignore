@@ -19,6 +19,11 @@ data/api_tokens_revoked.local
 eval/results/
 eval/feedback_candidates.jsonl
 
+# Remotion 本地依赖与输出
+video-renderer/node_modules/
+video-renderer/out/
+video-renderer/.remotion/
+
 # IDE / 系统
 .idea/
 .vscode

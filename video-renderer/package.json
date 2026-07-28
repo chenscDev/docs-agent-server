@@ -1,0 +1,19 @@
+{
+  "name": "ai-video-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion 模板：由 docs-agent-server 调用 npx remotion render",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render TalkingCaptions out/talk.mp4"
+  },
+  "remotion": {
+    "entryPoint": "./src/index.ts"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  }
+}

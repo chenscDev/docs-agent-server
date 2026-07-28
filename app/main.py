@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api import (
@@ -21,12 +23,15 @@ from app.api import (
     knowledge_bases,
     meta,
     sessions,
+    video,
 )
 from app.core.auth import ApiTokenAuthMiddleware
+from app.core.config import get_settings
 from app.core.errors import error_detail
 from app.core.request_log import RequestLogMiddleware
 from app.db.session import init_db
 from app.rag.parse_queue import start_parse_queue, stop_parse_queue
+from app.video.render_queue import start_video_queue, stop_video_queue
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,23 +41,26 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """启动：建表 → 解析队列 + 恢复未完成任务；关闭时停 worker。"""
+    """启动：建表 → 解析队列 + 视频队列；关闭时停 worker。"""
     init_db()
     n = start_parse_queue(recover=True)
+    vn = start_video_queue(recover=True)
     logging.getLogger("docs_agent.startup").info(
-        "parse queue ready, recovered=%s",
+        "parse queue ready recovered=%s; video queue recovered=%s",
         n,
+        vn,
     )
     try:
         yield
     finally:
+        stop_video_queue(wait=False)
         stop_parse_queue(wait=False)
 
 
 app = FastAPI(
     title="docs-agent-server",
-    description="文档问答 Agent 后端（P2 完成：改写 / 多 KB / Token / 解析队列）",
-    version="0.10.0",
+    description="文档问答 Agent + AI 短视频创作后端",
+    version="0.11.0",
     lifespan=lifespan,
 )
 
@@ -104,6 +112,17 @@ app.include_router(sessions.router)
 app.include_router(feedback.router)
 app.include_router(chat.router)
 app.include_router(chunks.router)
+app.include_router(video.router)
+
+# 本地/演示：输出 MP4 静态目录 → /cdn/video/
+_settings = get_settings()
+_video_dir = Path(_settings.video_output_dir)
+_video_dir.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/cdn/video",
+    StaticFiles(directory=str(_video_dir)),
+    name="cdn-video",
+)
 
 
 if __name__ == "__main__":

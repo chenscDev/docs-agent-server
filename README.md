@@ -31,6 +31,8 @@
 | [docs/INTERVIEW_CHEATSHEET_ALIYUN.md](./docs/INTERVIEW_CHEATSHEET_ALIYUN.md) | 阿里云二面 · 三栏速查 |
 | [docs/INTERVIEW_CHEATSHEET_ANT.md](./docs/INTERVIEW_CHEATSHEET_ANT.md) | 蚂蚁二面 · 三栏速查 |
 | [docs/INTERVIEW_ANSWERS_RECITE.md](./docs/INTERVIEW_ANSWERS_RECITE.md) | **可背诵完整答稿**（原题 + 项目锚点 + 解释） |
+| [docs/AI_VIDEO.md](./docs/AI_VIDEO.md) | **AI 短视频创作**（/v1/video，与问答隔离） |
+| [docs/DEMO_AI_VIDEO.md](./docs/DEMO_AI_VIDEO.md) | 短视频创作 Demo 口播 |
 | [docs/KNOWN_ISSUES.md](./docs/KNOWN_ISSUES.md) | 已知限制与和产品的差距 |
 | [docs/DEMO_SCRIPT.md](./docs/DEMO_SCRIPT.md) | 30 秒 / 3 分钟演示口播与操作清单 |
 | [docs/DEMO_VIDEO.md](./docs/DEMO_VIDEO.md) | 短视频镜头表与剪辑要点 |

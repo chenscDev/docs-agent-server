@@ -157,3 +157,35 @@ class MessageFeedback(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class VideoJob(Base):
+    """AI 短视频任务（与文档问答表隔离）。"""
+
+    __tablename__ = "video_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # pending | scripting | rendering | ready | failed | cancelled
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    progress: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stage_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    template_id: Mapped[str] = mapped_column(String(64), nullable=False, default="talking-captions")
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    parent_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storyboard_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    output_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cover_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    duration_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cancel_requested: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
