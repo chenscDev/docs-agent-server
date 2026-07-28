@@ -428,6 +428,106 @@ def _ffmpeg_supports_drawtext(ffmpeg: str) -> bool:
         return False
 
 
+def _accent_hex(scene: Scene) -> str:
+    """返回 0xRRGGBB 形式的强调色，供 ffmpeg drawbox 使用。"""
+    raw = (scene.accentColor or "#38BDF8").lstrip("#")
+    if len(raw) != 6:
+        return "0x38BDF8"
+    return f"0x{raw}"
+
+
+def _build_scene_drawtext_vf(
+    *,
+    template_id: str,
+    scene: Scene,
+    font: str,
+    width: int,
+    height: int,
+) -> str:
+    """
+    按模板生成 lavfi drawtext/drawbox 滤镜链（Pillow 失败时的主视觉差异）。
+
+    - talking-captions：底部字幕条 + 左侧强调条
+    - kinetic-text：顶部色带 + 大号居中标题 + 镜号
+    - brand-intro：居中描边框 + 标题/副文
+    """
+    tid = (template_id or "talking-captions").strip()
+    headline = _escape_drawtext(scene.headline[:40])
+    body = _escape_drawtext((scene.body or "")[:60])
+    accent = _accent_hex(scene)
+    font_q = font.replace(":", "\\:")
+    parts: list[str] = []
+
+    if tid == "kinetic-text":
+        top_h = max(48, int(height * 0.20))
+        parts.append(
+            f"drawbox=x=0:y=0:w={width}:h={top_h}:color={accent}@0.95:t=fill"
+        )
+        parts.append(
+            f"drawbox=x=0:y={height - 16}:w={width}:h=16:color={accent}@0.95:t=fill"
+        )
+        parts.append(
+            f"drawtext=fontfile='{font_q}':text='{scene.index + 1}':"
+            f"fontsize=28:fontcolor=white:x=28:y=28"
+        )
+        parts.append(
+            f"drawtext=fontfile='{font_q}':text='{headline}':fontsize=52:"
+            f"fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-20:"
+            f"box=1:boxcolor=black@0.55:boxborderw=18"
+        )
+        if body:
+            parts.append(
+                f"drawtext=fontfile='{font_q}':text='{body}':fontsize=24:"
+                f"fontcolor=white@0.9:x=(w-text_w)/2:y=(h-text_h)/2+60:"
+                f"box=1:boxcolor=black@0.4:boxborderw=12"
+            )
+    elif tid == "brand-intro":
+        mx = int(width * 0.1)
+        my = int(height * 0.30)
+        bw = width - 2 * mx
+        bh = int(height * 0.38)
+        parts.append(
+            f"drawbox=x={mx}:y={my}:w={bw}:h={bh}:color={accent}@0.95:t=6"
+        )
+        # 顶部圆点用小色块近似
+        cx = width // 2 - 24
+        cy = int(height * 0.22) - 24
+        parts.append(
+            f"drawbox=x={cx}:y={cy}:w=48:h=48:color={accent}@0.95:t=fill"
+        )
+        parts.append(
+            f"drawtext=fontfile='{font_q}':text='{headline}':fontsize=40:"
+            f"fontcolor=white:x=(w-text_w)/2:y={my + int(bh * 0.28)}:"
+            f"box=0"
+        )
+        if body:
+            parts.append(
+                f"drawtext=fontfile='{font_q}':text='{body}':fontsize=24:"
+                f"fontcolor=white@0.85:x=(w-text_w)/2:y={my + int(bh * 0.58)}"
+            )
+    else:
+        # talking-captions
+        bar_h = max(96, int(height * 0.28))
+        bar_y = height - bar_h
+        parts.append(
+            f"drawbox=x=0:y={bar_y}:w={width}:h={bar_h}:color=black@0.88:t=fill"
+        )
+        parts.append(
+            f"drawbox=x=0:y={bar_y}:w=14:h={bar_h}:color={accent}@1:t=fill"
+        )
+        parts.append(
+            f"drawtext=fontfile='{font_q}':text='{headline}':fontsize=40:"
+            f"fontcolor=white:x=36:y={bar_y + 28}"
+        )
+        if body:
+            parts.append(
+                f"drawtext=fontfile='{font_q}':text='{body}':fontsize=24:"
+                f"fontcolor=white@0.88:x=36:y={bar_y + 88}"
+            )
+
+    return ",".join(parts)
+
+
 def _make_scene_card_png(
     scene: Scene,
     *,
@@ -588,14 +688,12 @@ def _render_scene_clip(
         f"color=c=0x{color}:s={width}x{height}:d={scene.durationSec}:r={fps}",
     ]
     if use_drawtext and font:
-        headline = _escape_drawtext(scene.headline[:40])
-        body = _escape_drawtext((scene.body or "")[:60])
-        vf = (
-            f"drawtext=fontfile='{font}':text='{headline}':fontsize=42:"
-            f"fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2-40:"
-            f"box=1:boxcolor=black@0.35:boxborderw=16,"
-            f"drawtext=fontfile='{font}':text='{body}':fontsize=24:"
-            f"fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2+40"
+        vf = _build_scene_drawtext_vf(
+            template_id=template_id,
+            scene=scene,
+            font=font,
+            width=width,
+            height=height,
         )
         cmd.extend(["-vf", vf])
     cmd.extend(

@@ -266,7 +266,13 @@ def _plan_with_rules(
                 durationSec=3.5 if i == 0 else 3.0,
                 headline=beat[:40],
                 body=(brand_notes or "AI 短视频 · Remotion/模板渲染")[:80],
-                visualHint="大字幕居中" if template_id != "kinetic-text" else "快切文字",
+                visualHint=(
+                    "快切大标题"
+                    if template_id == "kinetic-text"
+                    else "品牌框居中"
+                    if template_id == "brand-intro"
+                    else "底部口播字幕条"
+                ),
                 bgColor=bg,
                 accentColor=accent,
             )

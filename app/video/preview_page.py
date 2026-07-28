@@ -14,22 +14,36 @@ def build_preview_html() -> str:
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#0B1220;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-  #stage{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#0F172A}
+  #stage{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#0B1220}
   #card{width:min(100%,420px);aspect-ratio:9/16;max-height:100%;position:relative;overflow:hidden;border-radius:12px;background:#0F172A}
-  #content{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 28px;transition:opacity .12s linear}
-  #headline{color:#fff;font-size:28px;font-weight:700;text-align:center;line-height:1.25;border-left:5px solid #38BDF8;padding-left:16px;max-width:100%}
-  #body{margin-top:18px;color:rgba(255,255,255,.82);font-size:15px;text-align:center;line-height:1.45;max-width:100%}
-  #hud{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,.55);font-size:11px;pointer-events:none}
-  #empty{color:rgba(255,255,255,.5);font-size:14px;text-align:center;padding:24px}
+  #content{position:absolute;inset:0;transition:opacity .12s linear}
+  #topBand,#bottomBand{position:absolute;left:0;right:0;background:#A78BFA;display:none}
+  #topBand{top:0;height:20%}
+  #bottomBand{bottom:0;height:16px}
+  #badge{position:absolute;top:16px;left:16px;color:#fff;font-size:16px;font-weight:700;display:none}
+  #brandDot{position:absolute;left:50%;top:18%;width:36px;height:36px;margin-left:-18px;border-radius:18px;background:#34D399;display:none}
+  #frameBox{position:absolute;left:10%;right:10%;top:28%;bottom:28%;border:5px solid #34D399;border-radius:22px;display:none}
+  #bar{position:absolute;left:0;right:0;bottom:0;height:28%;background:rgba(0,0,0,.88);border-left:10px solid #38BDF8;padding:18px 20px;display:none}
+  #headline{color:#fff;font-size:26px;font-weight:700;text-align:center;line-height:1.25;max-width:100%}
+  #body{margin-top:12px;color:rgba(255,255,255,.85);font-size:14px;text-align:center;line-height:1.45;max-width:100%}
+  #hud{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,.55);font-size:11px;pointer-events:none;z-index:5}
+  #empty{color:rgba(255,255,255,.5);font-size:14px;text-align:center;padding:24px;position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 </style>
 </head>
 <body>
 <div id="stage">
   <div id="card">
     <div id="content">
+      <div id="topBand"></div>
+      <div id="bottomBand"></div>
+      <div id="badge"></div>
+      <div id="brandDot"></div>
+      <div id="frameBox"></div>
+      <div id="bar">
+        <div id="headline"></div>
+        <div id="body"></div>
+      </div>
       <div id="empty">等待分镜数据…</div>
-      <div id="headline" style="display:none"></div>
-      <div id="body" style="display:none"></div>
     </div>
     <div id="hud"><span id="sceneLabel">—</span><span id="frameLabel">0f</span></div>
   </div>
@@ -89,35 +103,93 @@ def build_preview_html() -> str:
     return null;
   }
 
+  function hideAllChrome() {
+    ['topBand','bottomBand','badge','brandDot','frameBox','bar','empty'].forEach(function (id) {
+      document.getElementById(id).style.display = 'none';
+    });
+  }
+
   function render() {
     var hit = sceneAtFrame(state.frame);
-    var empty = document.getElementById('empty');
     var headline = document.getElementById('headline');
     var body = document.getElementById('body');
     var content = document.getElementById('content');
     var card = document.getElementById('card');
+    var bar = document.getElementById('bar');
+    hideAllChrome();
     if (!hit) {
-      empty.style.display = 'block';
-      headline.style.display = 'none';
-      body.style.display = 'none';
+      document.getElementById('empty').style.display = 'flex';
       document.getElementById('sceneLabel').textContent = '无分镜';
       document.getElementById('frameLabel').textContent = state.frame + 'f';
       return;
     }
-    empty.style.display = 'none';
-    headline.style.display = 'block';
     var sc = hit.scene;
+    var tid = (state.props.templateId || 'talking-captions');
+    var accent = sc.accentColor || '#38BDF8';
     card.style.background = sc.bgColor || '#0F172A';
-    headline.style.borderLeftColor = sc.accentColor || '#38BDF8';
     headline.textContent = sc.headline || '';
-    if (sc.body) {
-      body.style.display = 'block';
-      body.textContent = sc.body;
+    body.textContent = sc.body || '';
+    body.style.display = sc.body ? 'block' : 'none';
+
+    if (tid === 'kinetic-text') {
+      var top = document.getElementById('topBand');
+      var bottom = document.getElementById('bottomBand');
+      var badge = document.getElementById('badge');
+      top.style.display = 'block';
+      top.style.background = accent;
+      bottom.style.display = 'block';
+      bottom.style.background = accent;
+      badge.style.display = 'block';
+      badge.textContent = String(Number(sc.index) + 1);
+      bar.style.display = 'flex';
+      bar.style.flexDirection = 'column';
+      bar.style.alignItems = 'center';
+      bar.style.justifyContent = 'center';
+      bar.style.left = '8%';
+      bar.style.right = '8%';
+      bar.style.top = '32%';
+      bar.style.bottom = '28%';
+      bar.style.height = 'auto';
+      bar.style.background = 'rgba(0,0,0,0.55)';
+      bar.style.borderLeft = '0';
+      bar.style.borderRadius = '12px';
+      headline.style.fontSize = '28px';
+      headline.style.textAlign = 'center';
+    } else if (tid === 'brand-intro') {
+      var dot = document.getElementById('brandDot');
+      var frame = document.getElementById('frameBox');
+      dot.style.display = 'block';
+      dot.style.background = accent;
+      frame.style.display = 'block';
+      frame.style.borderColor = accent;
+      bar.style.display = 'flex';
+      bar.style.flexDirection = 'column';
+      bar.style.alignItems = 'center';
+      bar.style.justifyContent = 'center';
+      bar.style.left = '12%';
+      bar.style.right = '12%';
+      bar.style.top = '34%';
+      bar.style.bottom = '34%';
+      bar.style.height = 'auto';
+      bar.style.background = 'transparent';
+      bar.style.borderLeft = '0';
+      headline.style.fontSize = '24px';
     } else {
-      body.style.display = 'none';
-      body.textContent = '';
+      bar.style.display = 'block';
+      bar.style.left = '0';
+      bar.style.right = '0';
+      bar.style.top = 'auto';
+      bar.style.bottom = '0';
+      bar.style.height = '28%';
+      bar.style.background = 'rgba(0,0,0,0.88)';
+      bar.style.borderLeft = '10px solid ' + accent;
+      bar.style.borderRadius = '0';
+      headline.style.fontSize = '22px';
+      headline.style.textAlign = 'left';
+      body.style.textAlign = 'left';
     }
-    var fadeFrames = Math.max(1, Math.round(fps() * 0.3));
+
+    var fadeFrames = Math.max(1, Math.round(fps() * (tid === 'brand-intro' ? 0.45 : 0.2)));
     var opacity = Math.min(1, hit.local / fadeFrames);
     content.style.opacity = String(opacity);
     document.getElementById('sceneLabel').textContent =
