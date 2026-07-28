@@ -174,7 +174,8 @@ class VideoJob(Base):
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     parent_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    knowledge_base_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 支持多选：逗号分隔多个知识库 ID
+    knowledge_base_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     storyboard_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     output_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     output_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)

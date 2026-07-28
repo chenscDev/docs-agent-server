@@ -24,9 +24,11 @@ from app.video.render_queue import enqueue_video_job
 from app.video.schema import TEMPLATE_CATALOG, TemplateId, validate_storyboard
 from app.video.service import (
     create_job,
+    delete_job,
     get_job,
     job_to_dict,
     list_jobs,
+    normalize_knowledge_base_ids,
     remix_job,
     request_job_cancel,
 )
@@ -38,6 +40,7 @@ class CreateJobBody(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     template_id: TemplateId = Field(default="talking-captions", alias="templateId")
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
+    knowledge_base_ids: list[str] | None = Field(default=None, alias="knowledgeBaseIds")
     auto_start: bool = Field(default=True, alias="autoStart")
     storyboard: dict[str, Any] | None = None
 
@@ -50,6 +53,7 @@ class PlanBody(BaseModel):
     brand_notes: str = Field(default="", alias="brandNotes")
     knowledge_hint: str = Field(default="", alias="knowledgeHint")
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
+    knowledge_base_ids: list[str] | None = Field(default=None, alias="knowledgeBaseIds")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -101,6 +105,15 @@ def get_job_detail(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]
     return job_to_dict(job)
 
 
+@router.delete("/jobs/{job_id}")
+def remove_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """删除草稿 / 作品。"""
+    ok = delete_job(db, job_id)
+    if not ok:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    return {"ok": True, "id": job_id}
+
+
 @router.post("/jobs")
 def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     board = None
@@ -114,7 +127,10 @@ def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, An
         db,
         prompt=body.prompt,
         template_id=body.template_id,
-        knowledge_base_id=body.knowledge_base_id,
+        knowledge_base_id=normalize_knowledge_base_ids(
+            body.knowledge_base_id,
+            body.knowledge_base_ids,
+        ),
         storyboard=board,
     )
     if body.auto_start:
@@ -279,8 +295,12 @@ def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingRespo
     from app.video.service import resolve_knowledge_hint
 
     hint = (body.knowledge_hint or "").strip()
-    if not hint and body.knowledge_base_id:
-        hint = resolve_knowledge_hint(db, body.knowledge_base_id)
+    kb_ids = normalize_knowledge_base_ids(
+        body.knowledge_base_id,
+        body.knowledge_base_ids,
+    )
+    if not hint and kb_ids:
+        hint = resolve_knowledge_hint(db, kb_ids)
 
     def gen() -> Iterator[str]:
         yield from iter_creative_plan_sse(

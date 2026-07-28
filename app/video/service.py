@@ -119,23 +119,70 @@ def resolve_knowledge_hint(db: Session, knowledge_base_id: str | None) -> str:
     return _kb_hint(db, knowledge_base_id)
 
 
+def normalize_knowledge_base_ids(
+    knowledge_base_id: str | None = None,
+    knowledge_base_ids: list[str] | None = None,
+) -> str | None:
+    """合并单选 / 多选知识库 ID，逗号拼接后落库（空则不使用）。"""
+    ids: list[str] = []
+    if knowledge_base_ids:
+        for raw in knowledge_base_ids:
+            kid = (raw or "").strip()
+            if kid and kid not in ids:
+                ids.append(kid)
+    if knowledge_base_id:
+        for part in knowledge_base_id.split(","):
+            kid = part.strip()
+            if kid and kid not in ids:
+                ids.append(kid)
+    if not ids:
+        return None
+    return ",".join(ids[:8])
+
+
 def _kb_hint(db: Session, knowledge_base_id: str | None) -> str:
-    """可选：从 KB 取若干 chunk 作品牌约束（轻量，不跑完整 Agent）。"""
+    """可选：从一个或多个 KB 取若干 chunk 作品牌约束（轻量，不跑完整 Agent）。"""
     if not knowledge_base_id:
         return ""
     try:
         from app.db.models import Chunk
 
-        rows = db.scalars(
-            select(Chunk)
-            .where(Chunk.knowledge_base_id == knowledge_base_id)
-            .limit(3)
-        ).all()
-        texts = [r.content.strip()[:200] for r in rows if r.content]
-        return "\n".join(texts)
+        ids = [p.strip() for p in knowledge_base_id.split(",") if p.strip()][:5]
+        texts: list[str] = []
+        for kid in ids:
+            rows = db.scalars(
+                select(Chunk)
+                .where(Chunk.knowledge_base_id == kid)
+                .limit(3)
+            ).all()
+            texts.extend(r.content.strip()[:200] for r in rows if r.content)
+            if len(texts) >= 8:
+                break
+        return "\n".join(texts[:8])
     except Exception as exc:  # noqa: BLE001
         logger.debug("kb hint skip: %s", exc)
         return ""
+
+
+def delete_job(db: Session, job_id: str) -> bool:
+    """删除视频任务及其本地成片目录（若存在）。"""
+    job = get_job(db, job_id)
+    if job is None:
+        return False
+    # 尽量清理成片文件，失败不阻塞删库
+    if job.output_path:
+        try:
+            out = Path(job.output_path)
+            if out.is_file():
+                out.unlink(missing_ok=True)
+            parent = out.parent
+            if parent.is_dir() and parent.name == job_id:
+                shutil.rmtree(parent, ignore_errors=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("delete job files skip id=%s: %s", job_id, exc)
+    db.delete(job)
+    db.commit()
+    return True
 
 
 def run_job_pipeline(job_id: str) -> None:
