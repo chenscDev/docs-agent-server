@@ -43,7 +43,7 @@ def render_storyboard_to_mp4(
 
     顺序：Remotion → FFmpeg → 纯色兜底；TTS 失败不阻断成片。
     """
-    output_path = Path(output_path)
+    output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if cancel_check and cancel_check():
@@ -61,7 +61,7 @@ def render_storyboard_to_mp4(
     if result is None and mode in ("ffmpeg", "auto"):
         result = _try_ffmpeg(storyboard, output_path, cancel_check=cancel_check)
         if result is None and mode == "ffmpeg":
-            raise RuntimeError("FFmpeg 渲染失败且 VIDEO_RENDERER=ffmpeg")
+            logger.warning("FFmpeg 主路径失败，尝试纯色兜底")
 
     if result is None:
         result = _try_ffmpeg_solid(storyboard, output_path)
@@ -285,7 +285,7 @@ def _try_ffmpeg(
             check=False,
         )
         if proc.returncode != 0 or not output_path.is_file():
-            logger.warning("ffmpeg concat failed: %s", (proc.stderr or "")[-400:])
+            logger.warning("ffmpeg concat failed: %s", (proc.stderr or "")[-800:])
             return None
 
         cover = None
