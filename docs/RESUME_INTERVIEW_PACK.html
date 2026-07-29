@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>文档Agent + AI短视频 · 简历与面试材料</title>
+  <style>
+    @page { size: A4; margin: 16mm 14mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #1a1a1a;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 8px 4px 24px;
+    }
+    h1 {
+      font-size: 18pt;
+      margin: 0 0 6px;
+      border-bottom: 2px solid #0f766e;
+      padding-bottom: 6px;
+    }
+    h2 {
+      font-size: 13pt;
+      margin: 18px 0 8px;
+      color: #0f766e;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11pt;
+      margin: 12px 0 6px;
+      color: #134e4a;
+      page-break-after: avoid;
+    }
+    .meta { color: #555; font-size: 9.5pt; margin-bottom: 10px; }
+    .box {
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 8px 0 12px;
+    }
+    .tag {
+      display: inline-block;
+      background: #ccfbf1;
+      color: #115e59;
+      font-size: 8.5pt;
+      padding: 1px 7px;
+      border-radius: 999px;
+      margin-right: 4px;
+    }
+    ul { margin: 4px 0 8px; padding-left: 1.2em; }
+    li { margin: 3px 0; }
+    .qa { margin: 8px 0 12px; page-break-inside: avoid; }
+    .q { font-weight: 700; margin-bottom: 3px; }
+    .a { color: #222; }
+    .speech {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 10px 12px;
+      margin: 8px 0;
+      page-break-inside: avoid;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8px 0; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; }
+    .hr { height: 1px; background: #e2e8f0; margin: 14px 0; }
+    .small { font-size: 9pt; color: #64748b; }
+    .page-break { page-break-before: always; }
+  </style>
+</head>
+<body>
+
+<h1>文档 Agent + AI 短视频创作平台</h1>
+<p class="meta">
+  个人全栈项目 · 2026.07 – 至今<br/>
+  <span class="tag">React Native 动态分包</span>
+  <span class="tag">FastAPI</span>
+  <span class="tag">通义千问</span>
+  <span class="tag">RAG / Tool Calling</span>
+  <span class="tag">SSE</span>
+  <span class="tag">Remotion</span>
+  <span class="tag">FFmpeg</span>
+  <span class="tag">CosyVoice</span>
+  <span class="tag">CDN 热更新</span>
+</p>
+
+<!-- ========== 1 简历 ========== -->
+<h2>一、简历可用项目介绍（建议直接粘贴）</h2>
+<div class="box">
+  <strong>一句话：</strong>在原生动态分包 App 上，先做可溯源的私有文档问答 Agent，再同底座扩展「一句话→分镜→服务端成片→App 内播」的 AI 短视频闭环；渲染按 FFmpeg 兜底 → Remotion 主路径 → Lambda 弹性卸载分层演进。
+</div>
+
+<h3>1.1 简历正文（约 7 条，HR / 技术一眼抓重点）</h3>
+<ul>
+  <li><strong>架构：</strong>RN 动态分包（问答 docs-agent / 创作 home）+ 独立 FastAPI；问答与视频路由隔离，共用 SSE、取消、评测习惯，避免重渲染拖垮问答。</li>
+  <li><strong>文档 Agent：</strong>解析状态机 → Embedding → FAISS（按 KB）→ 手写 Tool Loop；空检索改写、指代改写、Rerank；SSE 工具轨迹 + 可点引用；停止可打断 LLM HTTP。</li>
+  <li><strong>短视频闭环：</strong>一句话流式分镜 → TTS 口播 → 服务端成片 → CDN 免鉴权 → App WebView 内嵌播放 / 分享；配图、Logo、多模板、Remix 版本链。</li>
+  <li><strong>渲染分层：</strong>FFmpeg 保演示机稳定出片；Remotion 做模板动效与预览同源；规划 Remotion Lambda 只做「渲这一跳」卸载，Schema/Job 不变。</li>
+  <li><strong>成本意识：</strong>Remix 按镜头 contentHash 缓存 clip，只重渲变更镜再 concat；API 与渲染可拆独立 worker，失败可恢复。</li>
+  <li><strong>问答在创作中的作用：</strong>知识库约束分镜事实；创作助手 Tool 可规划/改镜/入队，形成「问制度 → 出讲解短视频」闭环。</li>
+  <li><strong>工程与演进：</strong>固定评测集回归；CDN 热更发版；短中长期覆盖素材层、草稿箱、作品库、多比例导出与发布对接。</li>
+</ul>
+
+<h3>1.2 功能清单（分点）</h3>
+<ul>
+  <li><strong>已可演示：</strong>文档上传/解析/问答引用；一句话成片；配图+Logo；Remix 局部重渲；草稿筛选/复制/分享/重试；多比例入口；页内播放。</li>
+  <li><strong>短期（规划落地）：</strong>分镜素材层、局部重渲、草稿箱产品化。</li>
+  <li><strong>中期：</strong>Remotion 主路径、独立渲染队列、助手确认后直接入队；Lambda 作为内存紧时的可选渲染跳板。</li>
+  <li><strong>长期：</strong>ownerId 作品库、9:16/1:1/16:9 导出、分享卡对接渠道发布。</li>
+  <li><strong>再往后（可实现可演示）：</strong>BGM 曲库按模板绑定；口播多音色；分镜拖拽排序；成片字幕样式预设；「从会话一键出片」入口；失败原因看板；简易 A/B 模板对比页。</li>
+</ul>
+
+<h3>1.3 难点 · 特色 · 技术点</h3>
+<table>
+  <tr><th>类型</th><th>内容（实事求是）</th></tr>
+  <tr><td>难点</td><td>演示机内存紧导致 Remotion 不稳 → 必须有 FFmpeg 兜底；WebView 误把 favicon 401 当播放失败；局部重渲要保证音画拼接连贯。</td></tr>
+  <tr><td>特色</td><td>有界 Agent + 强 Schema（可渲染、可评测）；问答与创作同 App 双链路隔离；渲染三层可回退，不绑死单一厂商。</td></tr>
+  <tr><td>技术点</td><td>Tool Calling 循环、SSE、状态机队列 recover、FAISS 增量、clip 缓存 concat、Remotion props 与预览协议、CDN 分包热更。</td></tr>
+</table>
+
+<h3>1.4 问答系统最终起什么作用 / 怎么接入</h3>
+<ul>
+  <li><strong>角色：</strong>不是附属聊天窗，而是「事实源 + 创作入口」。制度/产品文档先进知识库，回答可引用；创作时可选 KB，planner 强约束避免瞎编卖点。</li>
+  <li><strong>接入方式：</strong>同一后端、不同路由；创作助手 Tool（plan_storyboard / refine_scene / submit_render）复用鉴权与 SSE；KB id 写入 Job/Storyboard 元数据可溯源。</li>
+  <li><strong>终态体验：</strong>在问答里确认条款 → 助手生成讲解分镜 → 一键入队渲染 → 作品库可回看「依据哪份文档」。</li>
+</ul>
+
+<div class="hr"></div>
+
+<!-- ========== 2 面试要点 ========== -->
+<div class="page-break"></div>
+<h2>二、面试要点（分点 Q&amp;A，有深度有广度）</h2>
+<p class="small">用法：先答黑体「结论句」，再按追问展开。勿夸大「已上生产多租户 / 已全量 Lambda」。 </p>
+
+<div class="qa">
+  <div class="q">Q1. 这个项目解决什么问题？和「套个 ChatGPT」有何不同？</div>
+  <div class="a"><strong>结论：</strong>做可演示的私有知识 Agent + 可渲染的短视频流水线。<br/>
+  不同点：① 文档状态机未 ready 不可检索；② 手写 Tool Loop 有界，不是无限聊天；③ 分镜是强 Schema，能进 Remotion/FFmpeg；④ 有评测集与 requestId/usage 可观测。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q2. 为什么客户端用 RN 动态分包、后端独立服务？</div>
+  <div class="a"><strong>结论：</strong>UI 热更、密钥与重计算不上端。<br/>
+  宿主只加载分包；Agent/RAG/TTS/渲染在 FastAPI；CDN 发 home/docs-agent，避免为改文案重打 APK。LLM Key 仅服务端。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q3. 为什么问答和短视频要路由隔离？</div>
+  <div class="a"><strong>结论：</strong>保护问答主路径 SLA。<br/>
+  渲染吃 CPU/内存；若共用编排易把制度问答拖垮。`/v1/chat` 与 `/v1/video` 分状态机、分队列约定，但复用 SSE/取消/Token 习惯，降低心智成本。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q4. RAG 怎么做的？幻觉怎么控？</div>
+  <div class="a"><strong>结论：</strong>检索强制 + 引用对齐 + 拒答。<br/>
+  切分→Embedding→FAISS（按 KB）→可选 Rerank；模型只能依据 tool 结果；citations 映射合法 `[n]`；无命中拒答。历史窗口截断控 Token。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q5. Tool Calling 自己写循环还是框架？</div>
+  <div class="a"><strong>结论：</strong>服务端手写 loop，便于流式与取消。<br/>
+  每轮：调模型 → 解析 tool_calls → 执行 → 回填 → 再调；SSE 先发 tool 事件再发 delta；cancel 关进行中 HTTP。流式/非流式共用同一 loop。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q6. FFmpeg / Remotion / Lambda 怎么选？</div>
+  <div class="a"><strong>结论：</strong>三层演进，可回退。<br/>
+  <strong>FFmpeg：</strong>演示机 2G 最稳，字幕/贴图/overlay/concat，保证「一定能出片」。<br/>
+  <strong>Remotion：</strong>模板动效与预览同源 props，观感主路径。<br/>
+  <strong>Lambda：</strong>规划为渲染卸载层——同机 Remotion 抢内存或峰值时，只换执行器，不改 Storyboard/Job 协议。当前演示以 auto（Remotion 优先、失败回退 FFmpeg）+ 独立 worker 为主，不把业务绑死 Lambda。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q7. 为什么不一开始就上 Lambda？</div>
+  <div class="a"><strong>结论：</strong>先闭环再弹性，避免过早分布式复杂度。<br/>
+  先验证 Schema、TTS、队列、评测；Lambda 引入鉴权、冷启动、调试成本。等「本机 Remotion 成为瓶颈」再卸，投入产出更清晰。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q8. Remix 局部重渲怎么做？</div>
+  <div class="a"><strong>结论：</strong>contentHash 缓存 clip + 变更镜重渲 + ffmpeg concat。<br/>
+  字段/TTS 文案变则 scene 受影响；未改镜复用旧 clip；保留 parentJobId/版本号。收益：改一镜不必整片重跑，省时省钱。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q9. 问答最终在短视频里起什么作用？</div>
+  <div class="a"><strong>结论：</strong>事实源 + 创作漏斗。<br/>
+  KB 约束卖点/制度表述；助手在确认 patch 后可 create_job/remix 入队；成片可回溯文档依据。差异化是「有据可查的讲解视频」，不是随机营销片。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q10. 任务队列与失败恢复？</div>
+  <div class="a"><strong>结论：</strong>SQLite 持久化状态 + worker 串行/可外置 + 启动 recover。<br/>
+  文档解析与视频渲染同思路：进程挂了能捞回 pending；中期 API 只 enqueue、渲染独立进程，避免渲染堵死 HTTP。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q11. App 内播放踩过什么坑？</div>
+  <div class="a"><strong>结论：</strong>别把子资源 HttpError 当整页失败。<br/>
+  favicon 401 曾误杀 WebView；改为优先加载 `player?embed=1`、软化 onHttpError、媒体失败可重试；成片路径免鉴权供播放器消费。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q12. 和真正生产还差什么？（加分题）</div>
+  <div class="a"><strong>结论：</strong>单机 FAISS/SQLite、进程内队列非分布式、无完整多租户 ACL、Lambda 为架构预留未作为日常默认。<br/>
+  演进：Redis/RQ、对象存储、混合检索、灰度发布、成本看板。能说清差距说明做过工程判断。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q13. 你怎么证明效果？</div>
+  <div class="a"><strong>结论：</strong>双评测 + 真机演示。<br/>
+  文档侧固定语料题集（含 followup）；视频侧分镜 Schema 校验脚本；演示路径：上传→问答引用→一句话成片→Remix→分享。</div>
+</div>
+
+<div class="qa">
+  <div class="q">Q14. 后续还能做什么且能演示？</div>
+  <div class="a"><strong>结论：</strong>只承诺可落地的。<br/>
+  BGM 模板绑定、多音色、分镜拖拽、会话「一键出片」、失败原因页、模板 A/B 对比。不做空口「自研大模型视频生成」。</div>
+</div>
+
+<div class="hr"></div>
+
+<!-- ========== 3 背诵稿 ========== -->
+<div class="page-break"></div>
+<h2>三、可背诵 / 可演讲完整稿（约 3～4 分钟）</h2>
+<div class="speech">
+<p><strong>【开场 · 30 秒】</strong><br/>
+面试官你好。我做的是一套「文档 Agent + AI 短视频」个人项目。前端是 React Native 动态分包 App，后端是 FastAPI。先把私有文档问答做稳，再在同一底座上做短视频创作。目标不是堆聊天框，而是把 Agent 工程链路和可演示成片都跑通。</p>
+
+<p><strong>【架构思想 · 40 秒】</strong><br/>
+架构上我做了两件关键决策：第一，客户端只做体验，密钥、检索、TTS、渲染全在服务端；第二，问答和创作路由隔离——问答走 docs-agent 与 /v1/chat，创作走 home 与 /v1/video——复用 SSE、取消和评测习惯，但状态机分开，避免重渲染拖垮制度问答。文档侧是解析状态机、Embedding、按知识库隔离的 FAISS，加上手写 Tool Calling；回答带可点引用，无证据就拒答。</p>
+
+<p><strong>【短视频与渲染选型 · 60 秒】</strong><br/>
+短视频链路是：一句话流式生成结构化分镜，CosyVoice 口播，服务端出 MP4，CDN 免鉴权给播放器，App 里 WebView 内嵌播放和分享。渲染我刻意做成三层：FFmpeg 做可靠兜底，保证两 G 内存的演示机也能稳定出片；Remotion 做观感主路径，模板动效和预览用同一套 props；Remotion Lambda 规划成弹性卸载层——当本机 Remotion 抢内存或流量上来时，只换「渲这一跳」的执行器，Schema 和 Job 协议不变。这样不会一上来就被云渲染绑死，也能讲清什么时候该上 Lambda。</p>
+
+<p><strong>【问答如何接入创作 · 40 秒】</strong><br/>
+问答不是旁路。知识库是事实源：创作可选 KB，planner 强约束文案；创作助手在确认修改后可以直接入队渲染。终态体验是：在问答里核对条款，一键生成讲解短视频，作品还能回溯依据哪份文档。另外 Remix 按镜头做 clip 缓存，只重渲变更镜再拼接，这是成本和体验上的工程点。</p>
+
+<p><strong>【演进与边界 · 40 秒】</strong><br/>
+短中长期我规划了素材与 Logo、局部重渲、草稿箱、独立渲染 worker、作品库、多比例和发布对接；再往后可以做 BGM、多音色、分镜拖拽、会话一键出片等可演示能力。我也清楚差距：现在是单机 FAISS 和 SQLite，队列可外置但不是完整分布式，Lambda 是架构预留。今天可以按您关心的方向展开：检索质量、Agent 边界，或渲染分层与局部重渲。</p>
+</div>
+
+<h3>30 秒电梯版（HR / 初筛）</h3>
+<div class="speech">
+我做了文档问答 Agent 加 AI 短视频创作。RN 分包 App + FastAPI；问答可引用私有文档；一句话能生成分镜并服务端成片。渲染用 FFmpeg 保底、Remotion 提观感，并规划 Lambda 做弹性卸载。问答知识库还能约束短视频内容，形成「有据讲解视频」。有评测和真机演示。
+</div>
+
+<h3>自我介绍钩子（可接追问）</h3>
+<ul>
+  <li>想听检索 / 幻觉 → 引 Q4、Q5</li>
+  <li>想听系统设计 → 引 Q2、Q3、Q10</li>
+  <li>想听多媒体 / 渲染 → 引 Q6、Q7、Q8</li>
+  <li>想听产品闭环 → 引 Q9、Q14</li>
+</ul>
+
+<div class="hr"></div>
+<p class="small">
+  材料说明：与仓库 docs-agent-server / rn-biz-0.86 / rn-dynamic-0.86 现状一致；「Lambda」表述为架构演进与规划接入，面试时勿说成「线上已默认全量 Lambda」。评测数字以当时 eval 结果为准，口述可用「固定题集回归」。
+</p>
+
+</body>
+</html>
