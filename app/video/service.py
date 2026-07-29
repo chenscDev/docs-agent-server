@@ -45,6 +45,13 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
         "durationSec": job.duration_sec,
         "errorCode": job.error_code,
         "errorMessage": job.error_message,
+        "ownerId": getattr(job, "owner_id", None),
+        "publishStatus": getattr(job, "publish_status", None) or "draft",
+        "publishedAt": (
+            job.published_at.isoformat()
+            if getattr(job, "published_at", None)
+            else None
+        ),
         "createdAt": job.created_at.isoformat() if job.created_at else None,
         "updatedAt": job.updated_at.isoformat() if job.updated_at else None,
     }
@@ -58,7 +65,10 @@ def create_job(
     knowledge_base_id: str | None = None,
     parent_job_id: str | None = None,
     storyboard: Storyboard | None = None,
+    owner_id: str | None = None,
 ) -> VideoJob:
+    settings = get_settings()
+    owner = (owner_id or settings.video_default_owner_id or "").strip() or None
     job = VideoJob(
         id=new_id("vjob"),
         status="pending",
@@ -69,6 +79,8 @@ def create_job(
         knowledge_base_id=knowledge_base_id,
         parent_job_id=parent_job_id,
         version=1,
+        owner_id=owner,
+        publish_status="draft",
     )
     if storyboard is not None:
         job.storyboard_json = json.dumps(
@@ -86,13 +98,60 @@ def create_job(
     return job
 
 
-def list_jobs(db: Session, *, limit: int = 50) -> list[VideoJob]:
-    stmt = (
-        select(VideoJob)
-        .order_by(VideoJob.created_at.desc())
-        .limit(max(1, min(limit, 100)))
-    )
+def list_jobs(
+    db: Session,
+    *,
+    limit: int = 50,
+    status: str | None = None,
+    owner_id: str | None = None,
+) -> list[VideoJob]:
+    stmt = select(VideoJob).order_by(VideoJob.created_at.desc())
+    status_norm = (status or "").strip().lower()
+    if status_norm and status_norm != "all":
+        stmt = stmt.where(VideoJob.status == status_norm)
+    owner = (owner_id or "").strip()
+    if owner:
+        stmt = stmt.where(VideoJob.owner_id == owner)
+    stmt = stmt.limit(max(1, min(limit, 100)))
     return list(db.scalars(stmt).all())
+
+
+def duplicate_job(db: Session, source: VideoJob) -> VideoJob:
+    """复制分镜为新草稿任务（不自动开渲，便于再编辑）。"""
+    board = None
+    if source.storyboard_json:
+        board = validate_storyboard(json.loads(source.storyboard_json))
+        board = board.model_copy(
+            update={"version": 1, "title": f"{board.title}（副本）"}
+        )
+    child = create_job(
+        db,
+        prompt=source.prompt,
+        template_id=source.template_id,  # type: ignore[arg-type]
+        knowledge_base_id=source.knowledge_base_id,
+        parent_job_id=source.id,
+        storyboard=board,
+        owner_id=source.owner_id,
+    )
+    child.status = "scripting" if board else "pending"
+    child.stage_message = "已复制，可编辑后重新生成"
+    child.progress = 0.35 if board else 0.0
+    db.commit()
+    db.refresh(child)
+    return child
+
+
+def publish_job(db: Session, job: VideoJob) -> VideoJob:
+    """标记作品已发布（长期发布对接占位）。"""
+    from datetime import datetime, timezone
+
+    if job.status != "ready" or not job.output_url:
+        raise ValueError("仅成功成片可发布")
+    job.publish_status = "published"
+    job.published_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 def get_job(db: Session, job_id: str) -> VideoJob | None:
@@ -288,6 +347,7 @@ def run_job_pipeline(job_id: str) -> None:
                 board,
                 output_path=out_file,
                 job_id=job.id,
+                parent_job_id=job.parent_job_id,
                 cancel_check=cancelled,
                 on_progress=report_render,
             )

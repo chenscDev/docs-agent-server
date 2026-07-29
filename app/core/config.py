@@ -65,13 +65,17 @@ class Settings(BaseSettings):
     ocr_timeout_sec: float = 60.0
 
     # AI 短视频（/v1/video/*，与问答主路径隔离）
-    # auto | remotion | ffmpeg
+    # auto | remotion | ffmpeg；演示环境优先 remotion，失败回退 ffmpeg
     video_renderer: str = "auto"
     video_output_dir: str = "./data/video_out"
     video_public_base_url: str = ""  # 空则用相对 /cdn/video/
     remotion_project_dir: str = "./video-renderer"
     video_render_timeout_sec: int = 300
     video_max_concurrent: int = 1
+    # true：API 进程不跑渲染 worker，改由独立 video_worker 消费
+    video_queue_external: bool = False
+    # 默认设备/账号维度作品归属（长期作品库；空表示匿名）
+    video_default_owner_id: str = ""
     # TTS：默认开启；无 API Key / SDK 失败时自动降级为静音片
     video_tts_enabled: bool = True
     video_tts_model: str = "cosyvoice-v2"

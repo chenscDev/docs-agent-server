@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
 import subprocess
 import tempfile
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +35,56 @@ class RenderResult:
     cover_path: Path | None = None
     scene_thumbs: dict[str, Path] = field(default_factory=dict)
     has_audio: bool = False
+    reused_scene_ids: list[str] = field(default_factory=list)
+
+
+def scene_content_hash(
+    scene: Scene,
+    *,
+    template_id: str,
+    speech_rate: float,
+) -> str:
+    """镜头内容指纹：文案/配图/时长/配音参数变化则需重渲。"""
+    payload = {
+        "templateId": template_id,
+        "speechRate": round(float(speech_rate), 3),
+        "id": scene.id,
+        "index": scene.index,
+        "durationSec": scene.durationSec,
+        "headline": scene.headline,
+        "body": scene.body or "",
+        "visualHint": scene.visualHint or "",
+        "bgColor": scene.bgColor,
+        "accentColor": scene.accentColor,
+        "imageUrl": scene.imageUrl or "",
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
+def clips_dir_for_job(job_id: str) -> Path:
+    settings = get_settings()
+    root = Path(settings.video_output_dir)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    path = root / "clips" / job_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def find_reusable_clip(
+    *,
+    parent_job_id: str | None,
+    scene_id: str,
+    content_hash: str,
+) -> Path | None:
+    if not parent_job_id:
+        return None
+    parent_dir = clips_dir_for_job(parent_job_id)
+    candidate = parent_dir / f"{scene_id}_{content_hash}.mp4"
+    if candidate.is_file() and candidate.stat().st_size > 0:
+        return candidate
+    return None
 
 
 def render_storyboard_to_mp4(
@@ -40,6 +92,7 @@ def render_storyboard_to_mp4(
     *,
     output_path: Path,
     job_id: str,
+    parent_job_id: str | None = None,
     cancel_check=None,
     on_progress: ProgressCallback | None = None,
 ) -> RenderResult:
@@ -47,6 +100,7 @@ def render_storyboard_to_mp4(
     渲染分镜为 MP4，并尽量生成封面/分镜缩略图与配音。
 
     顺序：Remotion → FFmpeg → 纯色兜底；TTS 失败不阻断成片。
+    Remix 子任务可通过 parent_job_id 复用未改镜 clip。
     """
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,19 +121,30 @@ def render_storyboard_to_mp4(
 
     report("准备渲染引擎…", 0.50)
 
-    if mode in ("remotion", "auto"):
+    # 有父任务且可复用 clip 时，优先走 FFmpeg 局部重渲（Remotion 整片无法复用 clip）
+    prefer_partial = bool(parent_job_id) and mode in ("auto", "ffmpeg")
+
+    if mode in ("remotion", "auto") and not prefer_partial:
         report("尝试 Remotion 高质量渲染…", 0.52)
         result = _try_remotion(storyboard, output_path, job_id=job_id)
         if result is None and mode == "remotion":
             raise RuntimeError("Remotion 渲染失败且 VIDEO_RENDERER=remotion")
         if result is not None:
             report("Remotion 成片完成，后处理中…", 0.88)
+            result = _apply_logo_overlay(storyboard, result)
 
     if result is None and mode in ("ffmpeg", "auto"):
-        report("使用 FFmpeg 逐镜合成画面与配音…", 0.54)
+        report(
+            "使用 FFmpeg 逐镜合成（支持局部复用）…"
+            if prefer_partial
+            else "使用 FFmpeg 逐镜合成画面与配音…",
+            0.54,
+        )
         result = _try_ffmpeg(
             storyboard,
             output_path,
+            job_id=job_id,
+            parent_job_id=parent_job_id,
             cancel_check=cancel_check,
             on_progress=on_progress,
         )
@@ -94,7 +159,6 @@ def render_storyboard_to_mp4(
             "无法渲染视频：请安装 ffmpeg，或配置 Remotion（video-renderer）"
         )
 
-    # Remotion / 纯色兜底后：尝试整片配音 + 抽帧缩略图
     if not result.has_audio:
         report("为成片合成旁白配音…", 0.90)
         voiced = _try_attach_full_narration(storyboard, result.output_path)
@@ -127,12 +191,13 @@ def render_storyboard_to_mp4(
         )
         result.cover_path = cover
 
-    # 混入 BGM（失败不阻断）
     report("混入背景音乐…", 0.97)
     mixed = _try_mix_bgm(storyboard, result.output_path)
     if mixed is not None:
         result.output_path = mixed
         result.has_audio = True
+
+    result = _apply_logo_overlay(storyboard, result)
 
     report("渲染收尾…", 0.99)
     return result
@@ -241,6 +306,8 @@ def _try_ffmpeg(
     storyboard: Storyboard,
     output_path: Path,
     *,
+    job_id: str | None = None,
+    parent_job_id: str | None = None,
     cancel_check=None,
     on_progress: ProgressCallback | None = None,
 ) -> RenderResult | None:
@@ -262,8 +329,11 @@ def _try_ffmpeg(
     use_drawtext = _ffmpeg_supports_drawtext(ffmpeg)
     thumbs: dict[str, Path] = {}
     has_audio = False
+    reused: list[str] = []
     job_stem = output_path.stem
     total = max(1, len(storyboard.scenes))
+    persist_dir = clips_dir_for_job(job_id) if job_id else None
+    cover = None
 
     with tempfile.TemporaryDirectory(prefix="ai-video-") as tmp:
         tmp_path = Path(tmp)
@@ -271,92 +341,91 @@ def _try_ffmpeg(
         for scene in storyboard.scenes:
             if cancel_check and cancel_check():
                 raise RuntimeError("CANCELLED")
-            # 画面合成约占 0.55~0.82，配音约占每镜后半
             base = 0.55 + 0.30 * (scene.index / total)
-            report(
-                f"绘制画面 {scene.index + 1}/{total}：{scene.headline[:24]}",
-                base,
+            sc_hash = scene_content_hash(
+                scene,
+                template_id=storyboard.templateId,
+                speech_rate=storyboard.speechRate,
+            )
+            reused_clip = find_reusable_clip(
+                parent_job_id=parent_job_id,
+                scene_id=scene.id,
+                content_hash=sc_hash,
             )
             part = tmp_path / f"{scene.index:02d}.mp4"
-            if not _render_scene_clip(
-                ffmpeg,
-                scene=scene,
-                output=part,
-                width=w,
-                height=h,
-                fps=fps,
-                font=font,
-                use_drawtext=use_drawtext,
-                template_id=storyboard.templateId,
-            ):
-                return None
+            if reused_clip is not None:
+                report(f"复用镜头 {scene.index + 1}/{total}（未改内容）", base)
+                shutil.copyfile(reused_clip, part)
+                reused.append(scene.id)
+                has_audio = True
+            else:
+                report(
+                    f"绘制画面 {scene.index + 1}/{total}：{scene.headline[:24]}",
+                    base,
+                )
+                if not _render_scene_clip(
+                    ffmpeg,
+                    scene=scene,
+                    output=part,
+                    width=w,
+                    height=h,
+                    fps=fps,
+                    font=font,
+                    use_drawtext=use_drawtext,
+                    template_id=storyboard.templateId,
+                ):
+                    return None
+                report(
+                    f"生成配音 {scene.index + 1}/{total}…",
+                    base + 0.30 / total * 0.5,
+                )
+                voiced = _mux_scene_tts(
+                    ffmpeg,
+                    scene=scene,
+                    video_path=part,
+                    tmp_dir=tmp_path,
+                    speech_rate=storyboard.speechRate,
+                )
+                if voiced is not None:
+                    part = voiced
+                    has_audio = True
 
-            # 分镜缩略图
+            if persist_dir is not None and part.is_file():
+                dest = persist_dir / f"{scene.id}_{sc_hash}.mp4"
+                try:
+                    if not dest.is_file():
+                        shutil.copyfile(part, dest)
+                except OSError as exc:
+                    logger.warning("保存 clip 失败: %s", exc)
+
             thumb = output_path.parent / f"{job_stem}_s{scene.index}.jpg"
             if _extract_single_thumb(part, thumb):
                 thumbs[scene.id] = thumb
-
-            # 单镜 TTS 配音
-            report(
-                f"生成配音 {scene.index + 1}/{total}…",
-                base + 0.30 / total * 0.5,
-            )
-            voiced = _mux_scene_tts(
-                ffmpeg,
-                scene=scene,
-                video_path=part,
-                tmp_dir=tmp_path,
-                speech_rate=storyboard.speechRate,
-            )
-            if voiced is not None:
-                part = voiced
-                has_audio = True
             parts.append(part)
 
         if not parts:
             return None
 
-        report("拼接全部分镜成片…", 0.88)
+        report(
+            f"拼接成片（复用 {len(reused)} 镜）…" if reused else "拼接全部分镜成片…",
+            0.88,
+        )
         list_file = tmp_path / "list.txt"
         list_file.write_text(
             "\n".join(f"file '{p.name}'" for p in parts) + "\n",
             encoding="utf-8",
         )
-        # 优先 stream copy（镜头已是统一 libx264/aac），降低 1.5G 机器在配音后的内存尖峰
         concat_copy = [
-            ffmpeg,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(list_file),
-            "-c",
-            "copy",
-            str(output_path),
+            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(list_file), "-c", "copy", str(output_path),
         ]
         if not has_audio:
             concat_copy = [
-                ffmpeg,
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                str(list_file),
-                "-c:v",
-                "copy",
-                "-an",
-                str(output_path),
+                ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                "-i", str(list_file), "-c:v", "copy", "-an", str(output_path),
             ]
         proc = subprocess.run(
-            concat_copy,
-            cwd=str(tmp_path),
-            capture_output=True,
-            text=True,
-            check=False,
+            concat_copy, cwd=str(tmp_path), capture_output=True, text=True, check=False,
         )
         if proc.returncode != 0 or not output_path.is_file():
             logger.warning(
@@ -366,18 +435,8 @@ def _try_ffmpeg(
             if output_path.is_file():
                 output_path.unlink(missing_ok=True)
             concat_cmd = [
-                ffmpeg,
-                "-y",
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                str(list_file),
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
+                ffmpeg, "-y", "-f", "concat", "-safe", "0",
+                "-i", str(list_file), "-c:v", "libx264", "-pix_fmt", "yuv420p",
             ]
             if has_audio:
                 concat_cmd.extend(["-c:a", "aac", "-shortest"])
@@ -385,11 +444,7 @@ def _try_ffmpeg(
                 concat_cmd.append("-an")
             concat_cmd.append(str(output_path))
             proc = subprocess.run(
-                concat_cmd,
-                cwd=str(tmp_path),
-                capture_output=True,
-                text=True,
-                check=False,
+                concat_cmd, cwd=str(tmp_path), capture_output=True, text=True, check=False,
             )
             if proc.returncode != 0 or not output_path.is_file():
                 logger.warning(
@@ -397,7 +452,7 @@ def _try_ffmpeg(
                 )
                 return None
 
-        report("拼接完成，生成封面与背景音乐…", 0.92)
+        report("拼接完成，生成封面…", 0.92)
         if storyboard.scenes and storyboard.scenes[0].id in thumbs:
             cover_path = output_path.parent / f"{job_stem}_cover.jpg"
             try:
@@ -411,7 +466,9 @@ def _try_ffmpeg(
             cover_path=cover,
             scene_thumbs=thumbs,
             has_audio=has_audio,
+            reused_scene_ids=reused,
         )
+
 
 
 def _ffmpeg_supports_drawtext(ffmpeg: str) -> bool:
@@ -553,6 +610,15 @@ def _make_scene_card_png(
         accent_rgb = (56, 189, 248)
 
     img = Image.new("RGB", (width, height), rgb)
+    # 有配图时铺满作为背景
+    bg_path = _resolve_image_file(getattr(scene, "imageUrl", "") or "")
+    if bg_path is not None:
+        try:
+            bg_img = Image.open(bg_path).convert("RGB")
+            bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
+            img.paste(bg_img, (0, 0))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("加载分镜配图失败: %s", exc)
     draw = ImageDraw.Draw(img)
     font_paths = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -1035,3 +1101,128 @@ def _resolution(aspect: str) -> tuple[int, int]:
     if aspect == "1:1":
         return 720, 720
     return 720, 1280  # 9:16
+
+def _resolve_image_file(url_or_path: str) -> Path | None:
+    """把 imageUrl/logoUrl 解析为本地文件（支持 /cdn/video 相对路径与 http）。"""
+    raw = (url_or_path or "").strip()
+    if not raw:
+        return None
+    settings = get_settings()
+    root = Path(settings.video_output_dir)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+
+    if raw.startswith("/cdn/video/"):
+        rel = raw[len("/cdn/video/") :]
+        local = root / rel
+        if local.is_file():
+            return local
+    if raw.startswith("cdn/video/"):
+        local = root / raw[len("cdn/video/") :]
+        if local.is_file():
+            return local
+
+    local2 = Path(raw)
+    if local2.is_file():
+        return local2
+    maybe = root / Path(raw).name
+    if maybe.is_file():
+        return maybe
+
+    if raw.startswith("http://") or raw.startswith("https://"):
+        try:
+            suffix = Path(raw.split("?", 1)[0]).suffix.lower() or ".jpg"
+            if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+                suffix = ".jpg"
+            dest = root / "assets" / f"fetch_{hashlib.sha1(raw.encode()).hexdigest()[:12]}{suffix}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.is_file():
+                urllib.request.urlretrieve(raw, str(dest))  # noqa: S310
+            if dest.is_file() and dest.stat().st_size > 0:
+                return dest
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("下载图片失败 url=%s: %s", raw[:120], exc)
+            return None
+    return None
+
+
+def _logo_overlay_xy(
+    position: str, *, width: int, height: int, logo_w: int, logo_h: int, margin: int = 24
+) -> tuple[int, int]:
+    pos = (position or "top-right").strip()
+    if pos == "top-left":
+        return margin, margin
+    if pos == "bottom-right":
+        return max(margin, width - logo_w - margin), max(margin, height - logo_h - margin)
+    return max(margin, width - logo_w - margin), margin
+
+
+def _apply_logo_overlay(storyboard: Storyboard, result: RenderResult) -> RenderResult:
+    """成片角标 Logo；无 logoUrl 时原样返回。"""
+    logo_url = (getattr(storyboard, "logoUrl", "") or "").strip()
+    if not logo_url or result.output_path is None or not result.output_path.is_file():
+        return result
+    logo_path = _resolve_image_file(logo_url)
+    if logo_path is None:
+        logger.warning("Logo 文件不可用: %s", logo_url[:120])
+        return result
+    ffmpeg = _ffmpeg_bin()
+    if not ffmpeg:
+        return result
+
+    w, h = _resolution(storyboard.aspectRatio)
+    target_w = max(64, int(w * 0.18))
+    try:
+        from PIL import Image
+
+        with Image.open(logo_path) as im:
+            iw, ih = im.size
+        if iw <= 0 or ih <= 0:
+            return result
+        target_h = max(32, int(target_w * ih / iw))
+    except Exception:
+        target_h = int(target_w * 0.45)
+
+    x, y = _logo_overlay_xy(
+        getattr(storyboard, "logoPosition", "top-right") or "top-right",
+        width=w,
+        height=h,
+        logo_w=target_w,
+        logo_h=target_h,
+    )
+    out = result.output_path.with_name(result.output_path.stem + "_logo.mp4")
+    filt = (
+        f"[1:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease[lg];"
+        f"[0:v][lg]overlay={x}:{y}:format=auto"
+    )
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(result.output_path),
+        "-i", str(logo_path),
+        "-filter_complex", filt,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        "-shortest",
+        str(out),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 or not out.is_file():
+        cmd2 = [
+            ffmpeg, "-y",
+            "-i", str(result.output_path),
+            "-i", str(logo_path),
+            "-filter_complex", filt,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-an",
+            str(out),
+        ]
+        proc2 = subprocess.run(cmd2, capture_output=True, text=True, check=False)
+        if proc2.returncode != 0 or not out.is_file():
+            logger.warning("Logo overlay 失败: %s", (proc.stderr or proc2.stderr or "")[-400:])
+            return result
+    try:
+        shutil.move(str(out), str(result.output_path))
+    except OSError:
+        result.output_path = out
+    return result
+

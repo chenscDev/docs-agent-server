@@ -75,9 +75,10 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    """建表并写入默认知识库。"""
+    """建表并写入默认知识库；补齐 video_jobs 新增列（sqlite）。"""
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
+    _ensure_video_job_columns(engine)
     assert SessionLocal is not None
     with SessionLocal() as db:
         exists = db.scalar(
@@ -91,3 +92,30 @@ def init_db() -> None:
                 )
             )
             db.commit()
+
+
+def _ensure_video_job_columns(engine: Engine) -> None:
+    """已有库 create_all 不会 ALTER，这里补 owner_id / publish 字段。"""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        try:
+            rows = conn.execute(text("PRAGMA table_info(video_jobs)")).fetchall()
+        except Exception:
+            return
+        cols = {r[1] for r in rows} if rows else set()
+        alters: list[str] = []
+        if "owner_id" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN owner_id VARCHAR(128)"
+            )
+        if "publish_status" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN publish_status VARCHAR(32) DEFAULT 'draft'"
+            )
+        if "published_at" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN published_at DATETIME"
+            )
+        for sql in alters:
+            conn.execute(text(sql))

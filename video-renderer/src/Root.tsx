@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   AbsoluteFill,
+  Img,
   Sequence,
   interpolate,
   useCurrentFrame,
@@ -15,6 +16,7 @@ export type Scene = {
   body?: string;
   bgColor?: string;
   accentColor?: string;
+  imageUrl?: string;
 };
 
 export type StoryboardProps = {
@@ -22,7 +24,59 @@ export type StoryboardProps = {
   templateId?: string;
   scenes?: Scene[];
   fps?: number;
+  logoUrl?: string;
+  logoPosition?: 'top-right' | 'top-left' | 'bottom-right';
 };
+
+function SceneBackground({scene}: {scene: Scene}) {
+  const bg = scene.bgColor || '#0F172A';
+  const src = (scene.imageUrl || '').trim();
+  if (src) {
+    return (
+      <AbsoluteFill style={{backgroundColor: bg}}>
+        <Img
+          src={src}
+          style={{width: '100%', height: '100%', objectFit: 'cover'}}
+        />
+        <AbsoluteFill style={{backgroundColor: 'rgba(0,0,0,0.28)'}} />
+      </AbsoluteFill>
+    );
+  }
+  return <AbsoluteFill style={{backgroundColor: bg}} />;
+}
+
+function LogoBadge({
+  logoUrl,
+  logoPosition = 'top-right',
+}: {
+  logoUrl?: string;
+  logoPosition?: StoryboardProps['logoPosition'];
+}) {
+  const src = (logoUrl || '').trim();
+  if (!src) {
+    return null;
+  }
+  const {width} = useVideoConfig();
+  const size = Math.round(width * 0.18);
+  const margin = 28;
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    width: size,
+    height: size,
+    objectFit: 'contain',
+  };
+  if (logoPosition === 'top-left') {
+    style.top = margin;
+    style.left = margin;
+  } else if (logoPosition === 'bottom-right') {
+    style.bottom = margin;
+    style.right = margin;
+  } else {
+    style.top = margin;
+    style.right = margin;
+  }
+  return <Img src={src} style={style} />;
+}
 
 /** 口播字幕条：底部字幕区 + 左侧强调色 */
 const TalkingCaptionsScene: React.FC<{scene: Scene}> = ({scene}) => {
@@ -32,7 +86,8 @@ const TalkingCaptionsScene: React.FC<{scene: Scene}> = ({scene}) => {
   const barH = Math.round(height * 0.28);
   const accent = scene.accentColor || '#38BDF8';
   return (
-    <AbsoluteFill style={{backgroundColor: scene.bgColor || '#0F172A'}}>
+    <AbsoluteFill>
+      <SceneBackground scene={scene} />
       <div
         style={{
           position: 'absolute',
@@ -83,13 +138,8 @@ const KineticTextScene: React.FC<{scene: Scene}> = ({scene}) => {
   });
   const opacity = Math.min(1, frame / (fps * 0.12));
   return (
-    <AbsoluteFill
-      style={{
-        backgroundColor: scene.bgColor || '#1E1B4B',
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
+    <AbsoluteFill style={{justifyContent: 'center', alignItems: 'center'}}>
+      <SceneBackground scene={scene} />
       <div
         style={{
           position: 'absolute',
@@ -170,13 +220,8 @@ const BrandIntroScene: React.FC<{scene: Scene}> = ({scene}) => {
     extrapolateRight: 'clamp',
   });
   return (
-    <AbsoluteFill
-      style={{
-        backgroundColor: scene.bgColor || '#022C22',
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
+    <AbsoluteFill style={{justifyContent: 'center', alignItems: 'center'}}>
+      <SceneBackground scene={scene} />
       <div
         style={{
           width: 56,
@@ -230,9 +275,13 @@ const BrandIntroScene: React.FC<{scene: Scene}> = ({scene}) => {
 function SequenceScenes({
   scenes,
   SceneComp,
+  logoUrl,
+  logoPosition,
 }: {
   scenes: Scene[];
   SceneComp: React.FC<{scene: Scene}>;
+  logoUrl?: string;
+  logoPosition?: StoryboardProps['logoPosition'];
 }) {
   const {fps} = useVideoConfig();
   let from = 0;
@@ -248,18 +297,46 @@ function SequenceScenes({
           </Sequence>
         );
       })}
+      <LogoBadge logoUrl={logoUrl} logoPosition={logoPosition} />
     </AbsoluteFill>
   );
 }
 
-export const TalkingCaptions: React.FC<StoryboardProps> = ({scenes = []}) => (
-  <SequenceScenes scenes={scenes} SceneComp={TalkingCaptionsScene} />
+export const TalkingCaptions: React.FC<StoryboardProps> = ({
+  scenes = [],
+  logoUrl,
+  logoPosition,
+}) => (
+  <SequenceScenes
+    scenes={scenes}
+    SceneComp={TalkingCaptionsScene}
+    logoUrl={logoUrl}
+    logoPosition={logoPosition}
+  />
 );
 
-export const KineticText: React.FC<StoryboardProps> = ({scenes = []}) => (
-  <SequenceScenes scenes={scenes} SceneComp={KineticTextScene} />
+export const KineticText: React.FC<StoryboardProps> = ({
+  scenes = [],
+  logoUrl,
+  logoPosition,
+}) => (
+  <SequenceScenes
+    scenes={scenes}
+    SceneComp={KineticTextScene}
+    logoUrl={logoUrl}
+    logoPosition={logoPosition}
+  />
 );
 
-export const BrandIntro: React.FC<StoryboardProps> = ({scenes = []}) => (
-  <SequenceScenes scenes={scenes} SceneComp={BrandIntroScene} />
+export const BrandIntro: React.FC<StoryboardProps> = ({
+  scenes = [],
+  logoUrl,
+  logoPosition,
+}) => (
+  <SequenceScenes
+    scenes={scenes}
+    SceneComp={BrandIntroScene}
+    logoUrl={logoUrl}
+    logoPosition={logoPosition}
+  />
 );

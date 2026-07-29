@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from app.core.errors import raise_api_error
 from app.core.ids import new_id
 from app.db.models import VideoJob
 from app.db.session import get_db
+from app.video.assets import save_uploaded_asset
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
@@ -27,10 +28,12 @@ from app.video.preview_page import build_preview_html
 from app.video.service import (
     create_job,
     delete_job,
+    duplicate_job,
     get_job,
     job_to_dict,
     list_jobs,
     normalize_knowledge_base_ids,
+    publish_job,
     remix_job,
     request_job_cancel,
 )
@@ -45,6 +48,7 @@ class CreateJobBody(BaseModel):
     knowledge_base_ids: list[str] | None = Field(default=None, alias="knowledgeBaseIds")
     auto_start: bool = Field(default=True, alias="autoStart")
     storyboard: dict[str, Any] | None = None
+    owner_id: str | None = Field(default=None, alias="ownerId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -93,9 +97,32 @@ def get_templates() -> dict[str, Any]:
     return {"items": TEMPLATE_CATALOG}
 
 
+@router.post("/assets")
+async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
+    """上传分镜配图 / Logo，返回可公网访问 URL。"""
+    data = await file.read()
+    try:
+        saved = save_uploaded_asset(
+            data=data,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        raise_api_error(400, "ASSET_INVALID", str(exc))
+    return saved
+
+
 @router.get("/jobs")
-def get_jobs(limit: int = 50, db: Session = Depends(get_db)) -> dict[str, Any]:
-    items = [job_to_dict(j) for j in list_jobs(db, limit=limit)]
+def get_jobs(
+    limit: int = 50,
+    status: str | None = None,
+    owner_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    items = [
+        job_to_dict(j)
+        for j in list_jobs(db, limit=limit, status=status, owner_id=owner_id)
+    ]
     return {"items": items}
 
 
@@ -134,6 +161,7 @@ def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, An
             body.knowledge_base_ids,
         ),
         storyboard=board,
+        owner_id=body.owner_id,
     )
     if body.auto_start:
         enqueue_video_job(job.id)
@@ -170,6 +198,32 @@ def retry_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     enqueue_video_job(job.id)
     db.refresh(job)
     return job_to_dict(job)
+
+
+@router.post("/jobs/{job_id}/duplicate")
+def post_duplicate(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """复制为新草稿（不自动开渲）。"""
+    source = get_job(db, job_id)
+    if source is None:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    try:
+        child = duplicate_job(db, source)
+    except Exception as exc:  # noqa: BLE001
+        raise_api_error(400, "DUPLICATE_FAILED", str(exc)[:200])
+    return job_to_dict(child)
+
+
+@router.post("/jobs/{job_id}/publish")
+def post_publish(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """标记发布（长期渠道对接占位）。"""
+    job = get_job(db, job_id)
+    if job is None:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    try:
+        published = publish_job(db, job)
+    except ValueError as exc:
+        raise_api_error(400, "PUBLISH_FAILED", str(exc))
+    return job_to_dict(published)
 
 
 @router.post("/jobs/{job_id}/remix")

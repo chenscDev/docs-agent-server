@@ -184,6 +184,11 @@ class VideoJob(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancel_requested: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 作品归属（设备/账号 id；长期作品库）
+    owner_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    # 发布状态：draft | published
+    publish_status: Mapped[str | None] = mapped_column(String(32), nullable=True, default="draft")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -35,8 +35,16 @@ def enqueue_video_job(job_id: str) -> bool:
     return True
 
 
-def start_video_queue(*, recover: bool = True) -> int:
+def start_video_queue(*, recover: bool = True, force: bool = False) -> int:
+    """启动进程内渲染 worker；VIDEO_QUEUE_EXTERNAL=true 时跳过（由独立 worker 消费）。"""
     global _executor
+    from app.core.config import get_settings
+
+    if get_settings().video_queue_external and not force:
+        logger.info("video queue external mode: skip in-process worker")
+        if recover:
+            return recover_incomplete_jobs()
+        return 0
     recovered = 0
     with _lock:
         if _executor is None:

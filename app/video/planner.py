@@ -206,10 +206,10 @@ def _plan_with_llm(
 
     system = (
         "你是短视频分镜导演。只输出 JSON，不要 Markdown。"
-        "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes。"
-        "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, bgColor, accentColor。"
+        "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes, logoUrl。"
+        "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, bgColor, accentColor, imageUrl。"
         "竖屏 9:16，镜头 3～6 个，总时长约 12～24 秒。"
-        "颜色用 #RRGGBB。"
+        "颜色用 #RRGGBB。知识库约束必须遵守，不可编造冲突卖点。"
     )
     user_parts = [
         f"用户一句话：{prompt}",

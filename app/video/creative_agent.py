@@ -62,6 +62,19 @@ CREATIVE_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit_render",
+            "description": "将当前分镜提交为渲染任务并入队（返回 jobId）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "autoStart": {"type": "boolean"},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -315,6 +328,29 @@ def iter_creative_agent_sse(
                             "storyboard",
                             {"storyboard": board.to_public_dict()},
                         )
+                    elif name == "submit_render" and board is not None:
+                        from app.db import session as db_session
+                        from app.video.render_queue import enqueue_video_job
+                        from app.video.service import create_job
+
+                        db_session.get_engine()
+                        assert db_session.SessionLocal is not None
+                        auto_start = args.get("autoStart", True) is not False
+                        with db_session.SessionLocal() as db:
+                            job = create_job(
+                                db,
+                                prompt=board.prompt,
+                                template_id=board.templateId,
+                                storyboard=board,
+                            )
+                            if auto_start:
+                                enqueue_video_job(job.id)
+                            summary = {
+                                "jobId": job.id,
+                                "status": job.status,
+                                "enqueued": auto_start,
+                            }
+                        yield emit("render_submitted", summary)
                     else:
                         ok = False
                         summary = {"error": "unknown tool or missing storyboard"}

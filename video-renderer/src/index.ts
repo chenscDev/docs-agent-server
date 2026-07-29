@@ -35,6 +35,12 @@ const RemotionRoot: React.FC = () => {
   const fps = 30;
   const durationInFrames = Math.max(1, Math.round(totalSec * fps));
 
+  const calcSize = (aspect?: string) => {
+    if (aspect === '16:9') return {width: 1280, height: 720};
+    if (aspect === '1:1') return {width: 720, height: 720};
+    return {width: 720, height: 1280};
+  };
+
   return (
     <>
       <Composition
@@ -46,10 +52,13 @@ const RemotionRoot: React.FC = () => {
         height={1280}
         defaultProps={defaultProps}
         calculateMetadata={async ({props}) => {
-          const scenes = (props as StoryboardProps).scenes || [];
+          const p = props as StoryboardProps & {aspectRatio?: string};
+          const scenes = p.scenes || [];
           const sec = scenes.reduce((a, b) => a + b.durationSec, 6);
+          const size = calcSize(p.aspectRatio);
           return {
             durationInFrames: Math.max(1, Math.round(sec * fps)),
+            ...size,
             props,
           };
         }}
@@ -62,6 +71,17 @@ const RemotionRoot: React.FC = () => {
         width={720}
         height={1280}
         defaultProps={defaultProps}
+        calculateMetadata={async ({props}) => {
+          const p = props as StoryboardProps & {aspectRatio?: string};
+          const scenes = p.scenes || [];
+          const sec = scenes.reduce((a, b) => a + b.durationSec, 6);
+          const size = calcSize(p.aspectRatio);
+          return {
+            durationInFrames: Math.max(1, Math.round(sec * fps)),
+            ...size,
+            props,
+          };
+        }}
       />
       <Composition
         id="BrandIntro"
@@ -71,6 +91,17 @@ const RemotionRoot: React.FC = () => {
         width={720}
         height={1280}
         defaultProps={defaultProps}
+        calculateMetadata={async ({props}) => {
+          const p = props as StoryboardProps & {aspectRatio?: string};
+          const scenes = p.scenes || [];
+          const sec = scenes.reduce((a, b) => a + b.durationSec, 6);
+          const size = calcSize(p.aspectRatio);
+          return {
+            durationInFrames: Math.max(1, Math.round(sec * fps)),
+            ...size,
+            props,
+          };
+        }}
       />
     </>
   );
