@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -463,6 +463,7 @@ def remotion_style_preview() -> HTMLResponse:
 @router.get("/player/{job_id}", response_class=HTMLResponse)
 def video_player_page(
     job_id: str,
+    request: Request,
     embed: int = 0,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -472,15 +473,15 @@ def video_player_page(
         raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在或尚未成片")
     settings = get_settings()
     base = (settings.video_public_base_url or "").rstrip("/")
+    if not base:
+        # WebView 内相对路径偶发解析失败：用当前请求 Host 拼绝对地址
+        base = str(request.base_url).rstrip("/")
     url = job.output_url
-    if url.startswith("/") and base:
+    if url.startswith("/"):
         url = f"{base}{url}"
-    elif url.startswith("/"):
-        # 相对路径：浏览器同 Host 访问即可
-        pass
     title = (job.title or "AI 短视频").replace("<", "").replace(">", "")
     cover = job.cover_url or ""
-    if cover.startswith("/") and base:
+    if cover.startswith("/"):
         cover = f"{base}{cover}"
     poster_attr = f' poster="{cover}"' if cover else ""
     # App 内嵌：全屏 video，自动尝试播放，并向 RN 回传状态
