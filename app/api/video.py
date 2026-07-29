@@ -20,10 +20,12 @@ from app.core.ids import new_id
 from app.db.models import VideoJob
 from app.db.session import get_db
 from app.video.assets import save_uploaded_asset
+from app.video.bgm_catalog import list_bgm_tracks
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
 from app.video.schema import TEMPLATE_CATALOG, TemplateId, validate_storyboard
+from app.video.tts_catalog import list_tts_voices
 from app.video.preview_page import build_preview_html
 from app.video.service import (
     create_job,
@@ -95,6 +97,18 @@ class CancelJobBody(BaseModel):
 @router.get("/templates")
 def get_templates() -> dict[str, Any]:
     return {"items": TEMPLATE_CATALOG}
+
+
+@router.get("/bgm-tracks")
+def get_bgm_tracks(template_id: str | None = None) -> dict[str, Any]:
+    """BGM 曲库；可按模板过滤推荐。"""
+    return {"items": list_bgm_tracks(template_id=template_id)}
+
+
+@router.get("/tts-voices")
+def get_tts_voices() -> dict[str, Any]:
+    """口播音色列表。"""
+    return {"items": list_tts_voices()}
 
 
 @router.post("/assets")

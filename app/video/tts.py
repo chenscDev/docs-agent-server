@@ -34,6 +34,7 @@ def synthesize_to_file(
     *,
     speech_rate: float | None = None,
     volume: int | None = None,
+    voice_id: str | None = None,
 ) -> Path | None:
     """
     合成语音到 output_path（wav）。
@@ -60,13 +61,18 @@ def synthesize_to_file(
         logger.warning("未安装 dashscope，TTS 不可用（pip install dashscope）")
         return None
 
+    from app.video.tts_catalog import resolve_tts_voice
+
     dashscope.api_key = api_key
     preferred = (
         (settings.video_tts_model or "").strip(),
         (settings.video_tts_voice or "").strip(),
     )
     combos: list[tuple[str, str]] = []
-    if preferred[0] and preferred[1]:
+    picked = resolve_tts_voice(voice_id)
+    if picked:
+        combos.append(picked)
+    if preferred[0] and preferred[1] and preferred not in combos:
         combos.append(preferred)
     for item in _TTS_FALLBACKS:
         if item not in combos:

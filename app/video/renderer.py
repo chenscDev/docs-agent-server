@@ -44,11 +44,13 @@ def scene_content_hash(
     *,
     template_id: str,
     speech_rate: float,
+    tts_voice: str = "",
 ) -> str:
     """镜头内容指纹：文案/配图/时长/配音参数变化则需重渲。"""
     payload = {
         "templateId": template_id,
         "speechRate": round(float(speech_rate), 3),
+        "ttsVoice": (tts_voice or "").strip(),
         "id": scene.id,
         "index": scene.index,
         "durationSec": scene.durationSec,
@@ -488,6 +490,7 @@ def _try_ffmpeg(
                 scene,
                 template_id=storyboard.templateId,
                 speech_rate=storyboard.speechRate,
+                tts_voice=storyboard.ttsVoice or "",
             )
             reused_clip = find_reusable_clip(
                 parent_job_id=parent_job_id,
@@ -527,6 +530,7 @@ def _try_ffmpeg(
                     video_path=part,
                     tmp_dir=tmp_path,
                     speech_rate=storyboard.speechRate,
+                    voice_id=storyboard.ttsVoice,
                 )
                 if voiced is not None:
                     part = voiced
@@ -928,6 +932,7 @@ def _mux_scene_tts(
     video_path: Path,
     tmp_dir: Path,
     speech_rate: float = 1.0,
+    voice_id: str | None = None,
 ) -> Path | None:
     """为单镜合成配音并混入；失败返回 None（保留静音片）。"""
     text = scene_narration_text(headline=scene.headline, body=scene.body or "")
@@ -937,6 +942,7 @@ def _mux_scene_tts(
         text,
         tmp_dir / f"{scene.index:02d}.wav",
         speech_rate=speech_rate,
+        voice_id=voice_id,
     )
     if audio_path is None:
         return None
@@ -1008,6 +1014,7 @@ def _try_attach_full_narration(storyboard: Storyboard, video_path: Path) -> Path
             text[:400],
             tmp_path / "full.wav",
             speech_rate=storyboard.speechRate,
+            voice_id=storyboard.ttsVoice,
         )
         if audio is None:
             return None
@@ -1126,7 +1133,12 @@ def _try_ffmpeg_solid(storyboard: Storyboard, output_path: Path) -> RenderResult
 
 def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
     """把轻 BGM 混入成片；关闭或失败返回 None。"""
+    from app.video.bgm_catalog import resolve_bgm_track
+
     settings = get_settings()
+    track = resolve_bgm_track(storyboard.bgmTrackId)
+    if not track or track.get("id") == "off":
+        return None
     enabled = bool(storyboard.bgmEnabled and settings.video_bgm_enabled)
     if not enabled:
         return None
@@ -1135,15 +1147,19 @@ def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
         return None
 
     duration = max(3.0, float(storyboard.total_duration_sec or 12.0))
-    vol = float(storyboard.bgmVolume if storyboard.bgmVolume is not None else settings.video_bgm_volume)
+    track_vol = float(track.get("volume") or 0.16)
+    vol = float(
+        storyboard.bgmVolume if storyboard.bgmVolume is not None else track_vol
+    )
     vol = max(0.0, min(1.0, vol))
     bgm_file = (settings.video_bgm_file or "").strip()
+    lavfi = str(track.get("lavfi") or "").strip()
+    af_extra = str(track.get("afExtra") or "lowpass=f=1200").strip()
 
     with tempfile.TemporaryDirectory(prefix="ai-video-bgm-") as tmp:
         tmp_path = Path(tmp)
         bgm_wav = tmp_path / "bgm.wav"
         if bgm_file and Path(bgm_file).is_file():
-            # 循环裁剪到片长
             cmd = [
                 ffmpeg,
                 "-y",
@@ -1159,31 +1175,39 @@ def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
                 "16000",
                 str(bgm_wav),
             ]
-        else:
-            # 粉噪轻氛围（无需外部素材）
+        elif lavfi:
+            src = lavfi
+            if "duration=" not in src:
+                if src.startswith("anoisesrc") or src.startswith("sine="):
+                    sep = ":" if "=" in src else ":"
+                    src = f"{src}{sep}duration={duration:.2f}"
+            fade_out_st = max(0.5, duration - 1.0)
             cmd = [
                 ffmpeg,
                 "-y",
                 "-f",
                 "lavfi",
                 "-i",
-                f"anoisesrc=color=pink:amplitude=0.35:duration={duration:.2f}",
+                src,
                 "-af",
-                f"lowpass=f=1200,volume={vol:.3f},"
-                f"afade=t=in:st=0:d=0.8,afade=t=out:st={max(0.5, duration - 1.0):.2f}:d=1.0",
+                f"{af_extra},volume={vol:.3f},"
+                f"afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_st:.2f}:d=1.0",
                 "-ac",
                 "1",
                 "-ar",
                 "16000",
+                "-t",
+                f"{duration:.2f}",
                 str(bgm_wav),
             ]
+        else:
+            return None
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if proc.returncode != 0 or not bgm_wav.is_file():
             logger.warning("生成 BGM 失败: %s", (proc.stderr or "")[-300:])
             return None
 
         out = video_path.with_name(video_path.stem + "_bgm.mp4")
-        # 有无原音轨都兼容：先尝试混音，失败则仅挂 BGM
         mix = [
             ffmpeg,
             "-y",
@@ -1207,7 +1231,6 @@ def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
         ]
         proc = subprocess.run(mix, capture_output=True, text=True, check=False)
         if proc.returncode != 0 or not out.is_file():
-            # 原片可能无音轨
             mix2 = [
                 ffmpeg,
                 "-y",

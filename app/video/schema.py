@@ -45,6 +45,10 @@ class Storyboard(BaseModel):
     speechRate: float = Field(1.0, ge=0.5, le=2.0)
     bgmEnabled: bool = True
     bgmVolume: float = Field(0.18, ge=0.0, le=1.0)
+    # BGM 曲库 id（soft-pink / bright-pulse / warm-pad / off）
+    bgmTrackId: str = Field("soft-pink", max_length=64)
+    # 口播音色 id（见 tts_catalog）
+    ttsVoice: str = Field("longxiaochun_v2", max_length=64)
 
     @field_validator("scenes")
     @classmethod
@@ -74,6 +78,7 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
         "description": "底部字幕条 + 左侧强调色，适合一句话口播解说",
         "coverColor": "#0F172A",
         "defaultAspect": "9:16",
+        "defaultBgmTrackId": "soft-pink",
     },
     {
         "id": "kinetic-text",
@@ -81,6 +86,7 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
         "description": "顶部色带 + 大号标题弹出，适合卖点快切罗列",
         "coverColor": "#1E1B4B",
         "defaultAspect": "9:16",
+        "defaultBgmTrackId": "bright-pulse",
     },
     {
         "id": "brand-intro",
@@ -88,5 +94,6 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
         "description": "居中描边品牌框 + 渐入，适合开场品牌印象",
         "coverColor": "#022C22",
         "defaultAspect": "9:16",
+        "defaultBgmTrackId": "warm-pad",
     },
 ]
