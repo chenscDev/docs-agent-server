@@ -2,6 +2,7 @@ import React from 'react';
 import {
   AbsoluteFill,
   Img,
+  OffthreadVideo,
   Sequence,
   interpolate,
   useCurrentFrame,
@@ -17,6 +18,8 @@ export type Scene = {
   bgColor?: string;
   accentColor?: string;
   imageUrl?: string;
+  /** 短视频底图，优先于 imageUrl */
+  videoUrl?: string;
 };
 
 export type StoryboardProps = {
@@ -30,12 +33,25 @@ export type StoryboardProps = {
 
 function SceneBackground({scene}: {scene: Scene}) {
   const bg = scene.bgColor || '#0F172A';
-  const src = (scene.imageUrl || '').trim();
-  if (src) {
+  const videoSrc = (scene.videoUrl || '').trim();
+  const imageSrc = (scene.imageUrl || '').trim();
+  if (videoSrc) {
+    return (
+      <AbsoluteFill style={{backgroundColor: bg}}>
+        <OffthreadVideo
+          src={videoSrc}
+          muted
+          style={{width: '100%', height: '100%', objectFit: 'cover'}}
+        />
+        <AbsoluteFill style={{backgroundColor: 'rgba(0,0,0,0.28)'}} />
+      </AbsoluteFill>
+    );
+  }
+  if (imageSrc) {
     return (
       <AbsoluteFill style={{backgroundColor: bg}}>
         <Img
-          src={src}
+          src={imageSrc}
           style={{width: '100%', height: '100%', objectFit: 'cover'}}
         />
         <AbsoluteFill style={{backgroundColor: 'rgba(0,0,0,0.28)'}} />

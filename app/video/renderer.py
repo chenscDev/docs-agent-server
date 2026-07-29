@@ -60,6 +60,7 @@ def scene_content_hash(
         "bgColor": scene.bgColor,
         "accentColor": scene.accentColor,
         "imageUrl": scene.imageUrl or "",
+        "videoUrl": getattr(scene, "videoUrl", "") or "",
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
@@ -738,8 +739,9 @@ def _make_scene_card_png(
     height: int,
     output: Path,
     template_id: str = "talking-captions",
+    transparent_bg: bool = False,
 ) -> Path | None:
-    """用 Pillow 画字幕卡；不同模板布局/装饰不同。"""
+    """用 Pillow 画字幕卡；transparent_bg=True 时仅画字幕叠层（RGBA），用于视频底图。"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:
@@ -755,16 +757,19 @@ def _make_scene_card_png(
         rgb = (15, 23, 42)
         accent_rgb = (56, 189, 248)
 
-    img = Image.new("RGB", (width, height), rgb)
-    # 有配图时铺满作为背景
-    bg_path = _resolve_image_file(getattr(scene, "imageUrl", "") or "")
-    if bg_path is not None:
-        try:
-            bg_img = Image.open(bg_path).convert("RGB")
-            bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
-            img.paste(bg_img, (0, 0))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("加载分镜配图失败: %s", exc)
+    if transparent_bg:
+        img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    else:
+        img = Image.new("RGB", (width, height), rgb)
+        # 有配图时铺满作为背景
+        bg_path = _resolve_image_file(getattr(scene, "imageUrl", "") or "")
+        if bg_path is not None:
+            try:
+                bg_img = Image.open(bg_path).convert("RGB")
+                bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
+                img.paste(bg_img, (0, 0))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("加载分镜配图失败: %s", exc)
     draw = ImageDraw.Draw(img)
     font_paths = [
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -793,33 +798,47 @@ def _make_scene_card_png(
         # 斜切色块 + 左上角编号
         draw.polygon(
             [(0, 0), (width, 0), (width, int(height * 0.22)), (0, int(height * 0.32))],
-            fill=accent_rgb,
+            fill=(*accent_rgb, 220) if transparent_bg else accent_rgb,
         )
-        draw.rectangle([0, height - 18, width, height], fill=accent_rgb)
-        draw.text((32, 36), f"#{scene.index + 1}", fill=(255, 255, 255), font=font_small)
+        draw.rectangle(
+            [0, height - 18, width, height],
+            fill=(*accent_rgb, 220) if transparent_bg else accent_rgb,
+        )
+        draw.text(
+            (32, 36),
+            f"#{scene.index + 1}",
+            fill=(255, 255, 255, 255) if transparent_bg else (255, 255, 255),
+            font=font_small,
+        )
         title_y = int(height * 0.42)
         body_y = int(height * 0.58)
     elif tid == "brand-intro":
         # 居中品牌框
         margin = int(width * 0.1)
         box = [margin, int(height * 0.32), width - margin, int(height * 0.68)]
+        outline = (*accent_rgb, 255) if transparent_bg else accent_rgb
         try:
-            draw.rounded_rectangle(box, radius=28, outline=accent_rgb, width=6)
+            draw.rounded_rectangle(box, radius=28, outline=outline, width=6)
         except AttributeError:
-            draw.rectangle(box, outline=accent_rgb, width=6)
+            draw.rectangle(box, outline=outline, width=6)
         draw.ellipse(
             [width // 2 - 28, int(height * 0.22) - 28, width // 2 + 28, int(height * 0.22) + 28],
-            fill=accent_rgb,
+            fill=(*accent_rgb, 255) if transparent_bg else accent_rgb,
         )
         title_y = int(height * 0.42)
         body_y = int(height * 0.55)
     else:
         # talking-captions：底部字幕条风格
         bar_h = int(height * 0.28)
-        draw.rectangle([0, height - bar_h, width, height], fill=(0, 0, 0))
-        draw.rectangle([0, height - bar_h, 12, height], fill=accent_rgb)
+        bar_fill = (0, 0, 0, 220) if transparent_bg else (0, 0, 0)
+        accent_fill = (*accent_rgb, 255) if transparent_bg else accent_rgb
+        draw.rectangle([0, height - bar_h, width, height], fill=bar_fill)
+        draw.rectangle([0, height - bar_h, 12, height], fill=accent_fill)
         title_y = height - bar_h + 36
         body_y = height - bar_h + 100
+
+    text_fill = (255, 255, 255, 255) if transparent_bg else (255, 255, 255)
+    box_fill = (0, 0, 0, 180) if transparent_bg else (0, 0, 0)
 
     def _draw_text(text: str, font, y: int, *, boxed: bool = True) -> None:
         if not text:
@@ -831,9 +850,9 @@ def _make_scene_card_png(
             pad = 16
             draw.rectangle(
                 [x - pad, y - 6, x + tw + pad, y + (bbox[3] - bbox[1]) + 10],
-                fill=(0, 0, 0),
+                fill=box_fill,
             )
-        draw.text((x, y), text, fill=(255, 255, 255), font=font)
+        draw.text((x, y), text, fill=text_fill, font=font)
 
     _draw_text(headline, font_large, title_y, boxed=True)
     _draw_text(body, font_small, body_y, boxed=tid != "talking-captions")
@@ -855,6 +874,60 @@ def _render_scene_clip(
     template_id: str = "talking-captions",
 ) -> bool:
     color = scene.bgColor.lstrip("#")
+    video_src = _resolve_media_file(getattr(scene, "videoUrl", "") or "")
+
+    # 有短视频底图：视频铺满 + 透明字幕叠层
+    if video_src is not None:
+        overlay = output.with_suffix(".overlay.png")
+        if _make_scene_card_png(
+            scene,
+            width=width,
+            height=height,
+            output=overlay,
+            template_id=template_id,
+            transparent_bg=True,
+        ):
+            vf = (
+                f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},trim=duration={scene.durationSec},"
+                f"setpts=PTS-STARTPTS,fps={fps}[bg];"
+                f"[1:v]format=rgba,fps={fps}[ov];"
+                f"[bg][ov]overlay=0:0:shortest=1[vout]"
+            )
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(video_src),
+                "-loop",
+                "1",
+                "-i",
+                str(overlay),
+                "-filter_complex",
+                vf,
+                "-map",
+                "[vout]",
+                "-t",
+                f"{scene.durationSec}",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-an",
+                str(output),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            try:
+                overlay.unlink(missing_ok=True)
+            except OSError:
+                pass
+            if proc.returncode == 0 and output.is_file():
+                return True
+            logger.warning(
+                "分镜视频底图渲染失败，回退静图: %s",
+                (proc.stderr or "")[-300:],
+            )
+
     # 优先 Pillow 字幕卡（兼容无 drawtext 的 ffmpeg）
     card = output.with_suffix(".png")
     if _make_scene_card_png(
@@ -1268,10 +1341,34 @@ def _resolution(aspect: str) -> tuple[int, int]:
     return 720, 1280  # 9:16
 
 def _resolve_image_file(url_or_path: str) -> Path | None:
-    """把 imageUrl/logoUrl 解析为本地文件（支持 /cdn/video 相对路径与 http）。"""
+    """把 imageUrl/logoUrl 解析为本地图片文件。"""
+    return _resolve_media_file(
+        url_or_path,
+        allowed_suffixes={".png", ".jpg", ".jpeg", ".webp", ".gif"},
+        default_suffix=".jpg",
+    )
+
+
+def _resolve_media_file(
+    url_or_path: str,
+    *,
+    allowed_suffixes: set[str] | None = None,
+    default_suffix: str = ".mp4",
+) -> Path | None:
+    """把 imageUrl/videoUrl/logoUrl 解析为本地文件（支持 /cdn/video 与 http）。"""
     raw = (url_or_path or "").strip()
     if not raw:
         return None
+    suffixes = allowed_suffixes or {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".gif",
+        ".mp4",
+        ".webm",
+        ".mov",
+    }
     settings = get_settings()
     root = Path(settings.video_output_dir)
     if not root.is_absolute():
@@ -1293,20 +1390,27 @@ def _resolve_image_file(url_or_path: str) -> Path | None:
     maybe = root / Path(raw).name
     if maybe.is_file():
         return maybe
+    maybe_assets = root / "assets" / Path(raw).name
+    if maybe_assets.is_file():
+        return maybe_assets
 
     if raw.startswith("http://") or raw.startswith("https://"):
         try:
-            suffix = Path(raw.split("?", 1)[0]).suffix.lower() or ".jpg"
-            if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
-                suffix = ".jpg"
-            dest = root / "assets" / f"fetch_{hashlib.sha1(raw.encode()).hexdigest()[:12]}{suffix}"
+            suffix = Path(raw.split("?", 1)[0]).suffix.lower() or default_suffix
+            if suffix not in suffixes:
+                suffix = default_suffix
+            dest = (
+                root
+                / "assets"
+                / f"fetch_{hashlib.sha1(raw.encode()).hexdigest()[:12]}{suffix}"
+            )
             dest.parent.mkdir(parents=True, exist_ok=True)
             if not dest.is_file():
                 urllib.request.urlretrieve(raw, str(dest))  # noqa: S310
             if dest.is_file() and dest.stat().st_size > 0:
                 return dest
         except Exception as exc:  # noqa: BLE001
-            logger.warning("下载图片失败 url=%s: %s", raw[:120], exc)
+            logger.warning("下载媒体失败 url=%s: %s", raw[:120], exc)
             return None
     return None
 

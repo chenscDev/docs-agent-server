@@ -113,7 +113,7 @@ def get_tts_voices() -> dict[str, Any]:
 
 @router.post("/assets")
 async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
-    """上传分镜配图 / Logo，返回可公网访问 URL。"""
+    """上传分镜配图 / 短视频 / Logo，返回可公网访问 URL。"""
     data = await file.read()
     try:
         saved = save_uploaded_asset(

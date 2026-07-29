@@ -25,6 +25,8 @@ class Scene(BaseModel):
     thumbUrl: str = Field("", max_length=500)
     # 分镜配图（用户上传或 URL）；空则走色块模板
     imageUrl: str = Field("", max_length=500)
+    # 分镜短视频素材；有值时优先于 imageUrl
+    videoUrl: str = Field("", max_length=500)
 
 
 class Storyboard(BaseModel):
