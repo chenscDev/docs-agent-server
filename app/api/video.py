@@ -417,6 +417,14 @@ def video_meta() -> dict[str, Any]:
         "renderer": settings.video_renderer,
         "outputDir": str(out),
         "remotionProject": settings.remotion_project_dir,
+        "remotionLambdaEnabled": bool(settings.remotion_lambda_enabled),
+        "remotionPreferLambda": bool(settings.remotion_prefer_lambda),
+        "remotionLambdaConfigured": bool(
+            settings.remotion_lambda_enabled
+            and settings.remotion_lambda_region
+            and settings.remotion_lambda_function_name
+            and settings.remotion_lambda_serve_url
+        ),
         "templates": len(TEMPLATE_CATALOG),
         "cdnPath": "/cdn/video/",
         "ttsEnabled": settings.video_tts_enabled,

@@ -28,10 +28,15 @@ docs-agent 分包       问答不变；可提示用户切到业务 Home 创作
 
 `VIDEO_RENDERER=auto`（默认）：
 
-1. 尝试 `npx remotion render`（`video-renderer/`）
-2. 回退 FFmpeg 色块 + drawtext 字幕条
-3. 均失败则任务 `failed`（需安装 ffmpeg 或 Remotion）
+1. 尝试本机 `npx remotion render`（`video-renderer/`，concurrency=1、限制 Node 堆）
+2. 若开启并配齐 **Remotion Lambda**：仅替换 render hop（本机失败后试；或 `REMOTION_PREFER_LAMBDA=true` 时优先云端）
+3. 回退 FFmpeg 色块 + drawtext；Remix 可复用 clip 时优先 FFmpeg
+4. 均失败则任务 `failed`
 
+`VIDEO_RENDERER=lambda`：只走 Lambda（需 `REMOTION_LAMBDA_ENABLED` 与 region/function/serveUrl）。  
+Job 状态机、进度 SSE、TTS、RN 客户端协议不变。
+
+详见 [video-renderer/README.md](../video-renderer/README.md)。
 ## 关键 API
 
 | 方法 | 路径 | 说明 |

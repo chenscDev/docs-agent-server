@@ -65,12 +65,23 @@ class Settings(BaseSettings):
     ocr_timeout_sec: float = 60.0
 
     # AI 短视频（/v1/video/*，与问答主路径隔离）
-    # auto | remotion | ffmpeg；演示环境优先 remotion，失败回退 ffmpeg
+    # auto | remotion | lambda | ffmpeg
+    # auto：本机 Remotion →（可选）Lambda 渲染跳板 → FFmpeg
     video_renderer: str = "auto"
     video_output_dir: str = "./data/video_out"
     video_public_base_url: str = ""  # 空则用相对 /cdn/video/
     remotion_project_dir: str = "./video-renderer"
     video_render_timeout_sec: int = 300
+    # 本机 Remotion 并发（2G 演示机建议 1，降低 OOM）
+    remotion_concurrency: int = 1
+    remotion_node_max_old_space_mb: int = 768
+    # Remotion Lambda：只替换 render hop；未配齐则自动跳过
+    remotion_lambda_enabled: bool = False
+    # true：auto 模式优先 Lambda（演示机内存紧时）；false：本机先试，失败再 Lambda
+    remotion_prefer_lambda: bool = False
+    remotion_lambda_region: str = ""
+    remotion_lambda_function_name: str = ""
+    remotion_lambda_serve_url: str = ""
     video_max_concurrent: int = 1
     # true：API 进程不跑渲染 worker，改由独立 video_worker 消费
     video_queue_external: bool = False

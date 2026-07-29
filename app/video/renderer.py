@@ -1,10 +1,11 @@
-"""视频渲染：优先 Remotion CLI，其次 FFmpeg 字幕条；可选 TTS 配音与缩略图。"""
+"""视频渲染：优先 Remotion CLI，可选 Lambda 渲染跳板，其次 FFmpeg 字幕条；可选 TTS 配音与缩略图。"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -99,7 +100,8 @@ def render_storyboard_to_mp4(
     """
     渲染分镜为 MP4，并尽量生成封面/分镜缩略图与配音。
 
-    顺序：Remotion → FFmpeg → 纯色兜底；TTS 失败不阻断成片。
+    顺序（auto）：本机 Remotion →（可选）Lambda 渲染跳板 → FFmpeg → 纯色兜底。
+    TTS / BGM / Logo / 缩略图仍在本机后处理；Job/SSE 不变。
     Remix 子任务可通过 parent_job_id 复用未改镜 clip。
     """
     output_path = Path(output_path).resolve()
@@ -121,16 +123,44 @@ def render_storyboard_to_mp4(
 
     report("准备渲染引擎…", 0.50)
 
-    # 有父任务且可复用 clip 时，优先走 FFmpeg 局部重渲（Remotion 整片无法复用 clip）
+    # 有父任务且可复用 clip 时，优先走 FFmpeg 局部重渲（整片 Remotion/Lambda 无法复用 clip）
     prefer_partial = bool(parent_job_id) and mode in ("auto", "ffmpeg")
 
-    if mode in ("remotion", "auto") and not prefer_partial:
-        report("尝试 Remotion 高质量渲染…", 0.52)
+    lambda_ready = _lambda_configured(settings)
+    prefer_lambda = bool(settings.remotion_prefer_lambda) or mode == "lambda"
+    try_local = mode in ("remotion", "auto") and not prefer_partial
+    try_lambda = (
+        (mode in ("lambda", "auto") or (mode == "remotion" and lambda_ready))
+        and lambda_ready
+        and not prefer_partial
+    )
+
+    # 1) 可选：优先 Lambda（演示机内存紧）
+    if try_lambda and prefer_lambda:
+        report("尝试 Remotion Lambda 云端渲染…", 0.52)
+        result = _try_remotion_lambda(storyboard, output_path, job_id=job_id)
+        if result is None and mode == "lambda":
+            raise RuntimeError("Remotion Lambda 渲染失败且 VIDEO_RENDERER=lambda")
+        if result is not None:
+            report("Lambda 成片完成，后处理中…", 0.88)
+            result = _apply_logo_overlay(storyboard, result)
+
+    # 2) 本机 Remotion CLI（默认先走这里，稳住观感主路径）
+    if result is None and try_local and not (prefer_lambda and mode == "lambda"):
+        report("尝试本机 Remotion 高质量渲染…", 0.53)
         result = _try_remotion(storyboard, output_path, job_id=job_id)
-        if result is None and mode == "remotion":
+        if result is None and mode == "remotion" and not try_lambda:
             raise RuntimeError("Remotion 渲染失败且 VIDEO_RENDERER=remotion")
         if result is not None:
             report("Remotion 成片完成，后处理中…", 0.88)
+            result = _apply_logo_overlay(storyboard, result)
+
+    # 3) 本机失败后再试 Lambda（未优先时的卸载跳板）
+    if result is None and try_lambda and not prefer_lambda:
+        report("本机 Remotion 未成功，尝试 Lambda 渲染跳板…", 0.54)
+        result = _try_remotion_lambda(storyboard, output_path, job_id=job_id)
+        if result is not None:
+            report("Lambda 成片完成，后处理中…", 0.88)
             result = _apply_logo_overlay(storyboard, result)
 
     if result is None and mode in ("ffmpeg", "auto"):
@@ -138,7 +168,7 @@ def render_storyboard_to_mp4(
             "使用 FFmpeg 逐镜合成（支持局部复用）…"
             if prefer_partial
             else "使用 FFmpeg 逐镜合成画面与配音…",
-            0.54,
+            0.55,
         )
         result = _try_ffmpeg(
             storyboard,
@@ -156,7 +186,7 @@ def render_storyboard_to_mp4(
         result = _try_ffmpeg_solid(storyboard, output_path)
     if result is None:
         raise RuntimeError(
-            "无法渲染视频：请安装 ffmpeg，或配置 Remotion（video-renderer）"
+            "无法渲染视频：请安装 ffmpeg，或配置 Remotion / Remotion Lambda"
         )
 
     if not result.has_audio:
@@ -203,11 +233,40 @@ def render_storyboard_to_mp4(
     return result
 
 
+def _composition_id(template_id: str) -> str:
+    return {
+        "talking-captions": "TalkingCaptions",
+        "kinetic-text": "KineticText",
+        "brand-intro": "BrandIntro",
+    }.get(template_id, "TalkingCaptions")
+
+
+def _write_props(storyboard: Storyboard, output_path: Path) -> Path:
+    props_path = output_path.with_suffix(".props.json")
+    props_path.write_text(
+        json.dumps(storyboard.to_public_dict(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return props_path
+
+
+def _lambda_configured(settings) -> bool:
+    if not bool(getattr(settings, "remotion_lambda_enabled", False)):
+        return False
+    return bool(
+        (settings.remotion_lambda_region or "").strip()
+        and (settings.remotion_lambda_function_name or "").strip()
+        and (settings.remotion_lambda_serve_url or "").strip()
+    )
+
+
 def _try_remotion(
     storyboard: Storyboard, output_path: Path, *, job_id: str
 ) -> RenderResult | None:
     settings = get_settings()
     root = Path(settings.remotion_project_dir)
+    if not root.is_absolute():
+        root = Path.cwd() / root
     if not root.is_dir():
         logger.info("Remotion 项目不存在: %s", root)
         return None
@@ -215,21 +274,19 @@ def _try_remotion(
     if not (root / "tsconfig.json").is_file():
         logger.info("Remotion 缺少 tsconfig.json，跳过: %s", root)
         return None
+    if not (root / "node_modules" / "remotion").is_dir() and not (
+        root / "node_modules" / "@remotion" / "cli"
+    ).is_dir():
+        logger.info("Remotion 依赖未安装（请在 video-renderer 执行 npm i），跳过")
+        return None
     npx = shutil.which("npx")
     if not npx:
         logger.info("未找到 npx，跳过 Remotion")
         return None
 
-    props_path = output_path.with_suffix(".props.json")
-    props_path.write_text(
-        json.dumps(storyboard.to_public_dict(), ensure_ascii=False),
-        encoding="utf-8",
-    )
-    composition = {
-        "talking-captions": "TalkingCaptions",
-        "kinetic-text": "KineticText",
-        "brand-intro": "BrandIntro",
-    }.get(storyboard.templateId, "TalkingCaptions")
+    props_path = _write_props(storyboard, output_path)
+    composition = _composition_id(storyboard.templateId)
+    concurrency = max(1, int(getattr(settings, "remotion_concurrency", 1) or 1))
 
     cmd = [
         npx,
@@ -238,8 +295,23 @@ def _try_remotion(
         composition,
         str(output_path),
         f"--props={props_path}",
+        f"--concurrency={concurrency}",
+        "--log=verbose",
     ]
-    logger.info("Remotion render job=%s composition=%s", job_id, composition)
+    env = os.environ.copy()
+    # 限制 Node 堆，避免 2G 机被本机 Chromium + Node 一起打爆
+    mem_mb = int(getattr(settings, "remotion_node_max_old_space_mb", 768) or 768)
+    if mem_mb > 0:
+        prev = env.get("NODE_OPTIONS", "")
+        flag = f"--max-old-space-size={mem_mb}"
+        env["NODE_OPTIONS"] = f"{prev} {flag}".strip() if prev else flag
+
+    logger.info(
+        "Remotion render job=%s composition=%s concurrency=%s",
+        job_id,
+        composition,
+        concurrency,
+    )
     try:
         proc = subprocess.run(
             cmd,
@@ -248,6 +320,7 @@ def _try_remotion(
             text=True,
             timeout=int(settings.video_render_timeout_sec),
             check=False,
+            env=env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("Remotion 执行异常: %s", exc)
@@ -258,6 +331,75 @@ def _try_remotion(
             "Remotion 失败 code=%s stderr=%s",
             proc.returncode,
             (proc.stderr or "")[-800:],
+        )
+        return None
+    return RenderResult(output_path=output_path, has_audio=False)
+
+
+def _try_remotion_lambda(
+    storyboard: Storyboard, output_path: Path, *, job_id: str
+) -> RenderResult | None:
+    """仅替换渲染执行器；TTS/BGM/缩略图仍走后续本机后处理。"""
+    settings = get_settings()
+    if not _lambda_configured(settings):
+        return None
+
+    root = Path(settings.remotion_project_dir)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    script = root / "scripts" / "render-on-lambda.mjs"
+    if not script.is_file():
+        logger.info("缺少 Lambda 脚本: %s", script)
+        return None
+    node = shutil.which("node")
+    if not node:
+        logger.info("未找到 node，跳过 Remotion Lambda")
+        return None
+
+    props_path = _write_props(storyboard, output_path)
+    composition = _composition_id(storyboard.templateId)
+    env = os.environ.copy()
+    env.update(
+        {
+            "REMOTION_LAMBDA_REGION": settings.remotion_lambda_region.strip(),
+            "REMOTION_LAMBDA_FUNCTION_NAME": settings.remotion_lambda_function_name.strip(),
+            "REMOTION_LAMBDA_SERVE_URL": settings.remotion_lambda_serve_url.strip(),
+            "REMOTION_LAMBDA_TIMEOUT_MS": str(
+                max(30_000, int(settings.video_render_timeout_sec) * 1000 - 5_000)
+            ),
+        }
+    )
+    cmd = [
+        node,
+        str(script),
+        "--composition",
+        composition,
+        "--props",
+        str(props_path),
+        "--out",
+        str(output_path),
+    ]
+    logger.info("Remotion Lambda render job=%s composition=%s", job_id, composition)
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=int(settings.video_render_timeout_sec) + 30,
+            check=False,
+            env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("Remotion Lambda 执行异常: %s", exc)
+        return None
+
+    if proc.returncode != 0 or not output_path.is_file():
+        logger.warning(
+            "Remotion Lambda 失败 code=%s stderr=%s stdout=%s",
+            proc.returncode,
+            (proc.stderr or "")[-600:],
+            (proc.stdout or "")[-400:],
         )
         return None
     return RenderResult(output_path=output_path, has_audio=False)
