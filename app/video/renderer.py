@@ -45,12 +45,14 @@ def scene_content_hash(
     template_id: str,
     speech_rate: float,
     tts_voice: str = "",
+    caption_position: str = "bottom",
 ) -> str:
-    """镜头内容指纹：文案/配图/时长/配音参数变化则需重渲。"""
+    """镜头内容指纹：文案/配图/时长/配音/字幕位置变化则需重渲。"""
     payload = {
         "templateId": template_id,
         "speechRate": round(float(speech_rate), 3),
         "ttsVoice": (tts_voice or "").strip(),
+        "captionPosition": (caption_position or "bottom").strip(),
         "id": scene.id,
         "index": scene.index,
         "durationSec": scene.durationSec,
@@ -492,6 +494,8 @@ def _try_ffmpeg(
                 template_id=storyboard.templateId,
                 speech_rate=storyboard.speechRate,
                 tts_voice=storyboard.ttsVoice or "",
+                caption_position=getattr(storyboard, "captionPosition", "bottom")
+                or "bottom",
             )
             reused_clip = find_reusable_clip(
                 parent_job_id=parent_job_id,
@@ -519,6 +523,8 @@ def _try_ffmpeg(
                     font=font,
                     use_drawtext=use_drawtext,
                     template_id=storyboard.templateId,
+                    caption_position=getattr(storyboard, "captionPosition", "bottom")
+                    or "bottom",
                 ):
                     return None
                 report(
@@ -647,11 +653,12 @@ def _build_scene_drawtext_vf(
     font: str,
     width: int,
     height: int,
+    caption_position: str = "bottom",
 ) -> str:
     """
     按模板生成 lavfi drawtext/drawbox 滤镜链（Pillow 失败时的主视觉差异）。
 
-    - talking-captions：底部字幕条 + 左侧强调条
+    - talking-captions：字幕条（上/中/下）+ 左侧强调条
     - kinetic-text：顶部色带 + 大号居中标题 + 镜号
     - brand-intro：居中描边框 + 标题/副文
     """
@@ -712,7 +719,13 @@ def _build_scene_drawtext_vf(
     else:
         # talking-captions
         bar_h = max(96, int(height * 0.28))
-        bar_y = height - bar_h
+        cap = (caption_position or "bottom").strip()
+        if cap == "top":
+            bar_y = 0
+        elif cap == "center":
+            bar_y = int(height * 0.36)
+        else:
+            bar_y = height - bar_h
         parts.append(
             f"drawbox=x=0:y={bar_y}:w={width}:h={bar_h}:color=black@0.88:t=fill"
         )
@@ -740,6 +753,7 @@ def _make_scene_card_png(
     output: Path,
     template_id: str = "talking-captions",
     transparent_bg: bool = False,
+    caption_position: str = "bottom",
 ) -> Path | None:
     """用 Pillow 画字幕卡；transparent_bg=True 时仅画字幕叠层（RGBA），用于视频底图。"""
     try:
@@ -828,14 +842,22 @@ def _make_scene_card_png(
         title_y = int(height * 0.42)
         body_y = int(height * 0.55)
     else:
-        # talking-captions：底部字幕条风格
+        # talking-captions：字幕条（上/中/下）
         bar_h = int(height * 0.28)
         bar_fill = (0, 0, 0, 220) if transparent_bg else (0, 0, 0)
         accent_fill = (*accent_rgb, 255) if transparent_bg else accent_rgb
-        draw.rectangle([0, height - bar_h, width, height], fill=bar_fill)
-        draw.rectangle([0, height - bar_h, 12, height], fill=accent_fill)
-        title_y = height - bar_h + 36
-        body_y = height - bar_h + 100
+        cap = (caption_position or "bottom").strip()
+        if cap == "top":
+            bar_y0, bar_y1 = 0, bar_h
+        elif cap == "center":
+            bar_y0 = int(height * 0.36)
+            bar_y1 = bar_y0 + bar_h
+        else:
+            bar_y0, bar_y1 = height - bar_h, height
+        draw.rectangle([0, bar_y0, width, bar_y1], fill=bar_fill)
+        draw.rectangle([0, bar_y0, 12, bar_y1], fill=accent_fill)
+        title_y = bar_y0 + 36
+        body_y = bar_y0 + 100
 
     text_fill = (255, 255, 255, 255) if transparent_bg else (255, 255, 255)
     box_fill = (0, 0, 0, 180) if transparent_bg else (0, 0, 0)
@@ -872,6 +894,7 @@ def _render_scene_clip(
     font: str | None,
     use_drawtext: bool,
     template_id: str = "talking-captions",
+    caption_position: str = "bottom",
 ) -> bool:
     color = scene.bgColor.lstrip("#")
     video_src = _resolve_media_file(getattr(scene, "videoUrl", "") or "")
@@ -886,6 +909,7 @@ def _render_scene_clip(
             output=overlay,
             template_id=template_id,
             transparent_bg=True,
+            caption_position=caption_position,
         ):
             vf = (
                 f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
@@ -936,6 +960,7 @@ def _render_scene_clip(
         height=height,
         output=card,
         template_id=template_id,
+        caption_position=caption_position,
     ):
         cmd = [
             ffmpeg,
@@ -979,6 +1004,7 @@ def _render_scene_clip(
             font=font,
             width=width,
             height=height,
+            caption_position=caption_position,
         )
         cmd.extend(["-vf", vf])
     cmd.extend(
@@ -1421,6 +1447,8 @@ def _logo_overlay_xy(
     pos = (position or "top-right").strip()
     if pos == "top-left":
         return margin, margin
+    if pos == "bottom-left":
+        return margin, max(margin, height - logo_h - margin)
     if pos == "bottom-right":
         return max(margin, width - logo_w - margin), max(margin, height - logo_h - margin)
     return max(margin, width - logo_w - margin), margin

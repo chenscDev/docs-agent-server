@@ -42,7 +42,11 @@ class Storyboard(BaseModel):
     brandNotes: str = Field("", max_length=500)
     # 品牌 Logo 叠层（成片角标）
     logoUrl: str = Field("", max_length=500)
-    logoPosition: Literal["top-right", "top-left", "bottom-right"] = "top-right"
+    logoPosition: Literal[
+        "top-right", "top-left", "bottom-right", "bottom-left"
+    ] = "top-right"
+    # 口播字幕条位置（主要影响 talking-captions）
+    captionPosition: Literal["bottom", "top", "center"] = "bottom"
     # 渲染选项（客户端可改；缺省走服务端配置）
     speechRate: float = Field(1.0, ge=0.5, le=2.0)
     bgmEnabled: bool = True

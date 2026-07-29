@@ -28,7 +28,9 @@ export type StoryboardProps = {
   scenes?: Scene[];
   fps?: number;
   logoUrl?: string;
-  logoPosition?: 'top-right' | 'top-left' | 'bottom-right';
+  logoPosition?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left';
+  /** 口播字幕条位置 */
+  captionPosition?: 'bottom' | 'top' | 'center';
 };
 
 function SceneBackground({scene}: {scene: Scene}) {
@@ -84,6 +86,9 @@ function LogoBadge({
   if (logoPosition === 'top-left') {
     style.top = margin;
     style.left = margin;
+  } else if (logoPosition === 'bottom-left') {
+    style.bottom = margin;
+    style.left = margin;
   } else if (logoPosition === 'bottom-right') {
     style.bottom = margin;
     style.right = margin;
@@ -94,13 +99,22 @@ function LogoBadge({
   return <Img src={src} style={style} />;
 }
 
-/** 口播字幕条：底部字幕区 + 左侧强调色 */
-const TalkingCaptionsScene: React.FC<{scene: Scene}> = ({scene}) => {
+/** 口播字幕条：可切换上/中/下 + 左侧强调色 */
+const TalkingCaptionsScene: React.FC<{
+  scene: Scene;
+  captionPosition?: StoryboardProps['captionPosition'];
+}> = ({scene, captionPosition = 'bottom'}) => {
   const frame = useCurrentFrame();
   const {fps, height} = useVideoConfig();
   const opacity = Math.min(1, frame / (fps * 0.25));
   const barH = Math.round(height * 0.28);
   const accent = scene.accentColor || '#38BDF8';
+  const barPos: React.CSSProperties =
+    captionPosition === 'top'
+      ? {top: 0}
+      : captionPosition === 'center'
+        ? {top: Math.round(height * 0.36)}
+        : {bottom: 0};
   return (
     <AbsoluteFill>
       <SceneBackground scene={scene} />
@@ -109,8 +123,8 @@ const TalkingCaptionsScene: React.FC<{scene: Scene}> = ({scene}) => {
           position: 'absolute',
           left: 0,
           right: 0,
-          bottom: 0,
           height: barH,
+          ...barPos,
           backgroundColor: 'rgba(0,0,0,0.88)',
           borderLeft: `14px solid ${accent}`,
           padding: '28px 36px',
@@ -145,7 +159,10 @@ const TalkingCaptionsScene: React.FC<{scene: Scene}> = ({scene}) => {
 };
 
 /** 图文快闪：顶部色带 + 大号标题弹出 */
-const KineticTextScene: React.FC<{scene: Scene}> = ({scene}) => {
+const KineticTextScene: React.FC<{
+  scene: Scene;
+  captionPosition?: StoryboardProps['captionPosition'];
+}> = ({scene}) => {
   const frame = useCurrentFrame();
   const {fps, height} = useVideoConfig();
   const accent = scene.accentColor || '#A78BFA';
@@ -228,7 +245,10 @@ const KineticTextScene: React.FC<{scene: Scene}> = ({scene}) => {
 };
 
 /** 品牌片头：居中描边框 + 顶部色点 */
-const BrandIntroScene: React.FC<{scene: Scene}> = ({scene}) => {
+const BrandIntroScene: React.FC<{
+  scene: Scene;
+  captionPosition?: StoryboardProps['captionPosition'];
+}> = ({scene}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const accent = scene.accentColor || '#34D399';
@@ -293,11 +313,16 @@ function SequenceScenes({
   SceneComp,
   logoUrl,
   logoPosition,
+  captionPosition,
 }: {
   scenes: Scene[];
-  SceneComp: React.FC<{scene: Scene}>;
+  SceneComp: React.FC<{
+    scene: Scene;
+    captionPosition?: StoryboardProps['captionPosition'];
+  }>;
   logoUrl?: string;
   logoPosition?: StoryboardProps['logoPosition'];
+  captionPosition?: StoryboardProps['captionPosition'];
 }) {
   const {fps} = useVideoConfig();
   let from = 0;
@@ -309,7 +334,7 @@ function SequenceScenes({
         from += durationInFrames;
         return (
           <Sequence key={scene.id} from={start} durationInFrames={durationInFrames}>
-            <SceneComp scene={scene} />
+            <SceneComp scene={scene} captionPosition={captionPosition} />
           </Sequence>
         );
       })}
@@ -322,12 +347,14 @@ export const TalkingCaptions: React.FC<StoryboardProps> = ({
   scenes = [],
   logoUrl,
   logoPosition,
+  captionPosition = 'bottom',
 }) => (
   <SequenceScenes
     scenes={scenes}
     SceneComp={TalkingCaptionsScene}
     logoUrl={logoUrl}
     logoPosition={logoPosition}
+    captionPosition={captionPosition}
   />
 );
 
@@ -335,12 +362,14 @@ export const KineticText: React.FC<StoryboardProps> = ({
   scenes = [],
   logoUrl,
   logoPosition,
+  captionPosition,
 }) => (
   <SequenceScenes
     scenes={scenes}
     SceneComp={KineticTextScene}
     logoUrl={logoUrl}
     logoPosition={logoPosition}
+    captionPosition={captionPosition}
   />
 );
 
@@ -348,11 +377,13 @@ export const BrandIntro: React.FC<StoryboardProps> = ({
   scenes = [],
   logoUrl,
   logoPosition,
+  captionPosition,
 }) => (
   <SequenceScenes
     scenes={scenes}
     SceneComp={BrandIntroScene}
     logoUrl={logoUrl}
     logoPosition={logoPosition}
+    captionPosition={captionPosition}
   />
 );

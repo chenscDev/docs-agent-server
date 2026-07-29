@@ -24,6 +24,7 @@ def build_preview_html() -> str:
   #brandDot{position:absolute;left:50%;top:18%;width:36px;height:36px;margin-left:-18px;border-radius:18px;background:#34D399;display:none}
   #frameBox{position:absolute;left:10%;right:10%;top:28%;bottom:28%;border:5px solid #34D399;border-radius:22px;display:none}
   #bar{position:absolute;left:0;right:0;bottom:0;height:28%;background:rgba(0,0,0,.88);border-left:10px solid #38BDF8;padding:18px 20px;display:none}
+  #logoBadge{position:absolute;width:18%;aspect-ratio:1;object-fit:contain;display:none;z-index:4}
   #headline{color:#fff;font-size:26px;font-weight:700;text-align:center;line-height:1.25;max-width:100%}
   #body{margin-top:12px;color:rgba(255,255,255,.85);font-size:14px;text-align:center;line-height:1.45;max-width:100%}
   #hud{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,.55);font-size:11px;pointer-events:none;z-index:5}
@@ -43,6 +44,7 @@ def build_preview_html() -> str:
         <div id="headline"></div>
         <div id="body"></div>
       </div>
+      <img id="logoBadge" alt="logo"/>
       <div id="empty">等待分镜数据…</div>
     </div>
     <div id="hud"><span id="sceneLabel">—</span><span id="frameLabel">0f</span></div>
@@ -104,9 +106,27 @@ def build_preview_html() -> str:
   }
 
   function hideAllChrome() {
-    ['topBand','bottomBand','badge','brandDot','frameBox','bar','empty'].forEach(function (id) {
+    ['topBand','bottomBand','badge','brandDot','frameBox','bar','empty','logoBadge'].forEach(function (id) {
       document.getElementById(id).style.display = 'none';
     });
+  }
+
+  function placeLogo() {
+    var logo = document.getElementById('logoBadge');
+    var src = (state.props.logoUrl || '').trim();
+    if (!src) return;
+    var pos = state.props.logoPosition || 'top-right';
+    logo.src = src;
+    logo.style.display = 'block';
+    logo.style.top = 'auto';
+    logo.style.bottom = 'auto';
+    logo.style.left = 'auto';
+    logo.style.right = 'auto';
+    var m = '14px';
+    if (pos === 'top-left') { logo.style.top = m; logo.style.left = m; }
+    else if (pos === 'bottom-left') { logo.style.bottom = m; logo.style.left = m; }
+    else if (pos === 'bottom-right') { logo.style.bottom = m; logo.style.right = m; }
+    else { logo.style.top = m; logo.style.right = m; }
   }
 
   function render() {
@@ -175,12 +195,20 @@ def build_preview_html() -> str:
       bar.style.borderLeft = '0';
       headline.style.fontSize = '24px';
     } else {
+      var cap = state.props.captionPosition || 'bottom';
       bar.style.display = 'block';
       bar.style.left = '0';
       bar.style.right = '0';
-      bar.style.top = 'auto';
-      bar.style.bottom = '0';
       bar.style.height = '28%';
+      bar.style.top = 'auto';
+      bar.style.bottom = 'auto';
+      if (cap === 'top') {
+        bar.style.top = '0';
+      } else if (cap === 'center') {
+        bar.style.top = '36%';
+      } else {
+        bar.style.bottom = '0';
+      }
       bar.style.background = 'rgba(0,0,0,0.88)';
       bar.style.borderLeft = '10px solid ' + accent;
       bar.style.borderRadius = '0';
@@ -188,6 +216,8 @@ def build_preview_html() -> str:
       headline.style.textAlign = 'left';
       body.style.textAlign = 'left';
     }
+
+    placeLogo();
 
     var fadeFrames = Math.max(1, Math.round(fps() * (tid === 'brand-intro' ? 0.45 : 0.2)));
     var opacity = Math.min(1, hit.local / fadeFrames);
