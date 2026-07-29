@@ -21,7 +21,7 @@ from app.core.tokens import auth_enabled, is_api_token_valid
 logger = logging.getLogger("docs_agent.auth")
 
 # 探活放行；其余（含 /docs、/debug、/v1/*）均需 Token（若已配置）
-_PUBLIC_PATHS = frozenset({"/health"})
+_PUBLIC_PATHS = frozenset({"/health", "/favicon.ico"})
 # 成片 / 封面 / 分镜缩略图：系统播放器与 <Image> 无法带 Bearer
 # HTML 播放页同样免鉴权，便于 App Linking 打开
 _PUBLIC_PREFIXES = ("/cdn/video", "/v1/video/player", "/v1/video/preview")
