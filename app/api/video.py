@@ -439,8 +439,12 @@ def remotion_style_preview() -> HTMLResponse:
 
 
 @router.get("/player/{job_id}", response_class=HTMLResponse)
-def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLResponse:
-    """免鉴权 HTML5 播放页（App 内 Linking 打开即可看片+听声）。"""
+def video_player_page(
+    job_id: str,
+    embed: int = 0,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """免鉴权 HTML5 播放页；embed=1 供 App WebView 全幅内嵌（无标题/下载栏）。"""
     job = get_job(db, job_id)
     if job is None or not job.output_url:
         raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在或尚未成片")
@@ -456,6 +460,41 @@ def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLRespons
     cover = job.cover_url or ""
     if cover.startswith("/") and base:
         cover = f"{base}{cover}"
+    poster_attr = f' poster="{cover}"' if cover else ""
+    # App 内嵌：全屏 video，自动尝试播放，并向 RN 回传状态
+    if embed:
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>{title}</title>
+  <style>
+    html,body{{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}}
+    video{{width:100%;height:100%;object-fit:contain;background:#000;display:block;}}
+  </style>
+</head>
+<body>
+  <video id="v" controls playsinline webkit-playsinline preload="auto"{poster_attr} src="{url}"></video>
+  <script>
+  (function(){{
+    var v=document.getElementById('v');
+    function post(t){{try{{window.ReactNativeWebView&&window.ReactNativeWebView.postMessage(t);}}catch(e){{}}}}
+    if(!v){{return;}}
+    v.addEventListener('play',function(){{post('play');}});
+    v.addEventListener('pause',function(){{post('pause');}});
+    v.addEventListener('ended',function(){{post('ended');}});
+    v.addEventListener('loadeddata',function(){{post('ready');}});
+    v.addEventListener('canplay',function(){{post('ready');}});
+    v.addEventListener('error',function(){{post('mediaerror');}});
+    var p=v.play();
+    if(p&&p.catch){{p.catch(function(){{post('needtap');}});}}
+  }})();
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
+
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -479,7 +518,7 @@ def video_player_page(job_id: str, db: Session = Depends(get_db)) -> HTMLRespons
 </head>
 <body>
   <div class="wrap">
-    <video controls autoplay playsinline webkit-playsinline poster="{cover}" src="{url}"></video>
+    <video controls autoplay playsinline webkit-playsinline{poster_attr} src="{url}"></video>
     <h1>{title}</h1>
     <p class="meta">{url}</p>
     <div class="share">
