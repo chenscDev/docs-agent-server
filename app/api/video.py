@@ -101,6 +101,16 @@ class RemixBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class VideoHandoffBody(BaseModel):
+    """问答一键出片：暂存创意供首页 Tab 拉取。"""
+
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
+    source: str = Field(default="docs-agent")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ExportRatiosBody(BaseModel):
     """一键多比例导出请求。"""
 
@@ -144,6 +154,50 @@ def get_bgm_tracks(template_id: str | None = None) -> dict[str, Any]:
 def get_tts_voices() -> dict[str, Any]:
     """口播音色列表。"""
     return {"items": list_tts_voices()}
+
+
+def _token_key_from_request(request: Request) -> str:
+    auth = request.headers.get("authorization") or ""
+    scheme, _, credential = auth.partition(" ")
+    if scheme.lower() == "bearer" and credential.strip():
+        return credential.strip()
+    return "_anon"
+
+
+@router.post("/handoff")
+def post_video_handoff(
+    body: VideoHandoffBody,
+    request: Request,
+) -> dict[str, Any]:
+    """问答一键出片：暂存创意，首页 Tab 再拉取（跨 RN 实例）。"""
+    from app.video.handoff_store import put_handoff
+
+    try:
+        return put_handoff(
+            prompt=body.prompt,
+            knowledge_base_id=body.knowledge_base_id,
+            source=body.source,
+            token_key=_token_key_from_request(request),
+        )
+    except ValueError as exc:
+        raise_api_error(400, "HANDOFF_INVALID", str(exc)[:200])
+
+
+@router.post("/handoff/consume")
+def post_consume_video_handoff(
+    request: Request,
+    handoff_id: str | None = None,
+) -> dict[str, Any]:
+    """消费一条出片交接；无草稿时返回 { handoff: null }。"""
+    from app.video.handoff_store import consume_handoff
+
+    # 兼容 query ?handoffId= / JSON 无 body
+    qid = (handoff_id or request.query_params.get("handoffId") or "").strip()
+    row = consume_handoff(
+        handoff_id=qid or None,
+        token_key=_token_key_from_request(request),
+    )
+    return {"handoff": row}
 
 
 @router.post("/assets")
