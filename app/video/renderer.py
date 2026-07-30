@@ -485,10 +485,12 @@ def _try_ffmpeg(
     with tempfile.TemporaryDirectory(prefix="ai-video-") as tmp:
         tmp_path = Path(tmp)
         parts: list[Path] = []
-        for scene in storyboard.scenes:
+        for ord_i, scene in enumerate(storyboard.scenes):
             if cancel_check and cancel_check():
                 raise RuntimeError("CANCELLED")
-            base = 0.55 + 0.30 * (scene.index / total)
+            # 用列表位次展示，避免 scene.index 不连续时出现 6/5
+            display_n = ord_i + 1
+            base = 0.55 + 0.30 * (ord_i / total)
             sc_hash = scene_content_hash(
                 scene,
                 template_id=storyboard.templateId,
@@ -502,15 +504,18 @@ def _try_ffmpeg(
                 scene_id=scene.id,
                 content_hash=sc_hash,
             )
-            part = tmp_path / f"{scene.index:02d}.mp4"
+            part = tmp_path / f"{ord_i:02d}.mp4"
             if reused_clip is not None:
-                report(f"复用镜头 {scene.index + 1}/{total}（未改内容）", base)
+                report(
+                    f"镜头 {display_n}/{total} · 复用未改内容",
+                    base,
+                )
                 shutil.copyfile(reused_clip, part)
                 reused.append(scene.id)
                 has_audio = True
             else:
                 report(
-                    f"绘制画面 {scene.index + 1}/{total}：{scene.headline[:24]}",
+                    f"镜头 {display_n}/{total} · 绘制画面：{scene.headline[:24]}",
                     base,
                 )
                 if not _render_scene_clip(
@@ -528,7 +533,7 @@ def _try_ffmpeg(
                 ):
                     return None
                 report(
-                    f"生成配音 {scene.index + 1}/{total}…",
+                    f"镜头 {display_n}/{total} · 生成配音…",
                     base + 0.30 / total * 0.5,
                 )
                 voiced = _mux_scene_tts(
@@ -551,7 +556,7 @@ def _try_ffmpeg(
                 except OSError as exc:
                     logger.warning("保存 clip 失败: %s", exc)
 
-            thumb = output_path.parent / f"{job_stem}_s{scene.index}.jpg"
+            thumb = output_path.parent / f"{job_stem}_s{ord_i}.jpg"
             if _extract_single_thumb(part, thumb):
                 thumbs[scene.id] = thumb
             parts.append(part)

@@ -9,6 +9,11 @@ from typing import Any
 
 from app.core.ids import new_id
 from app.core.llm import LLMClient
+from app.video.materials import (
+    attach_materials_to_scenes,
+    normalize_materials,
+    target_scene_count,
+)
 from app.video.schema import Scene, Storyboard, TemplateId, validate_storyboard
 
 logger = logging.getLogger(__name__)
@@ -26,6 +31,7 @@ def plan_storyboard(
     template_id: TemplateId = "talking-captions",
     brand_notes: str = "",
     knowledge_hint: str = "",
+    materials: list[dict[str, Any]] | None = None,
     prefer_rules: bool = False,
 ) -> Storyboard:
     """根据一句话生成分镜；LLM 不可用或校验失败时走规则模板。"""
@@ -33,6 +39,8 @@ def plan_storyboard(
     if not prompt:
         raise ValueError("prompt 不能为空")
 
+    mats = normalize_materials(materials)
+    board: Storyboard | None = None
     if not prefer_rules:
         try:
             board = _plan_with_llm(
@@ -40,18 +48,21 @@ def plan_storyboard(
                 template_id=template_id,
                 brand_notes=brand_notes,
                 knowledge_hint=knowledge_hint,
+                materials=mats,
             )
-            if board is not None:
-                return board
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM 分镜失败，回退规则: %s", exc)
+            board = None
 
-    return _plan_with_rules(
-        prompt,
-        template_id=template_id,
-        brand_notes=brand_notes,
-        knowledge_hint=knowledge_hint,
-    )
+    if board is None:
+        board = _plan_with_rules(
+            prompt,
+            template_id=template_id,
+            brand_notes=brand_notes,
+            knowledge_hint=knowledge_hint,
+            materials=mats,
+        )
+    return attach_materials_to_scenes(board, mats)
 
 
 def _looks_like_refine_command(instruction: str) -> bool:
@@ -198,24 +209,29 @@ def _plan_with_llm(
     template_id: TemplateId,
     brand_notes: str,
     knowledge_hint: str,
+    materials: list[dict[str, str]] | None = None,
 ) -> Storyboard | None:
     try:
         llm = LLMClient()
     except ValueError:
         return None
 
+    mats = normalize_materials(materials)
+    scene_n = target_scene_count(mats, default=4)
     system = (
         "你是短视频分镜导演。只输出 JSON，不要 Markdown。"
         "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes, logoUrl。"
         "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, "
         "bgColor, accentColor, imageUrl, videoUrl, sourceIndex。"
-        "imageUrl/videoUrl 默认可留空；有短视频素材时填 videoUrl，优先于 imageUrl。"
-        "竖屏 9:16，镜头 3～6 个，总时长约 12～24 秒。"
+        "imageUrl/videoUrl 默认可留空（服务端会按素材列表自动填充）。"
+        f"竖屏 9:16，镜头约 {scene_n} 个（3～9），总时长约 12～28 秒。"
         "颜色用 #RRGGBB。"
         "若提供知识库约束（带 [n] 编号）："
         "1) 卖点/合规句必须改写自这些条目，禁止编造未出现的承诺；"
         "2) 每个镜头必须填 sourceIndex=所用条目编号；"
         "3) headline/body 要能对应到该编号内容。"
+        "若提供用户素材列表：按素材顺序讲故事，每镜文案贴合对应素材内容，"
+        "visualHint 简述该素材如何出镜。"
         "按模板差异化："
         "talking-captions→headline 口语短句、body 稍长便于口播、durationSec 偏 3.5～4.5；"
         "kinetic-text→headline 极短有力（≤14字）、body 可空或一句、durationSec 偏 2～3；"
@@ -224,6 +240,7 @@ def _plan_with_llm(
     user_parts = [
         f"用户一句话：{prompt}",
         f"模板：{template_id}",
+        f"建议镜头数：{scene_n}",
     ]
     if brand_notes.strip():
         user_parts.append(f"品牌备注：{brand_notes.strip()}")
@@ -231,6 +248,14 @@ def _plan_with_llm(
         user_parts.append(
             "知识库约束（必须遵守，按编号引用）：\n"
             + knowledge_hint.strip()[:1600]
+        )
+    if mats:
+        lines = []
+        for i, m in enumerate(mats):
+            lines.append(f"[{i + 1}] kind={m['kind']} url={m['url'][:120]}")
+        user_parts.append(
+            "用户上传素材（按顺序对应镜头，服务端会写入 imageUrl/videoUrl）：\n"
+            + "\n".join(lines)
         )
 
     content = llm.chat(
@@ -262,21 +287,30 @@ def _plan_with_rules(
     template_id: TemplateId,
     brand_notes: str,
     knowledge_hint: str,
+    materials: list[dict[str, str]] | None = None,
 ) -> Storyboard:
     """无 LLM 时的确定性分镜（演示/评测可用）。"""
     bg, accent = _PALETTES.get(template_id, _PALETTES["talking-captions"])
     title = _short_title(prompt)
+    mats = normalize_materials(materials)
     kb_beats = _parse_kb_beats(knowledge_hint)
     if kb_beats:
-        # 有知识库时优先用编号条目做镜，强制引用
         beats = [b["text"] for b in kb_beats[:5]]
         source_indices = [b["index"] for b in kb_beats[:5]]
     else:
         beats = _split_beats(prompt)
         source_indices = [None] * len(beats)
 
+    want = target_scene_count(mats, default=min(5, max(3, len(beats))))
+    # 镜头数对齐素材：不够则循环文案节拍
+    while len(beats) < want:
+        beats.append(beats[len(beats) % max(1, len(_split_beats(prompt)))][:40])
+        source_indices.append(None)
+    beats = beats[:want]
+    source_indices = source_indices[:want]
+
     scenes: list[Scene] = []
-    for i, beat in enumerate(beats[:5]):
+    for i, beat in enumerate(beats):
         src_idx = source_indices[i] if i < len(source_indices) else None
         if template_id == "kinetic-text":
             duration = 2.4 if i > 0 else 2.8
@@ -284,15 +318,22 @@ def _plan_with_rules(
             body = ""
             hint = "快切大标题弹入"
         elif template_id == "brand-intro":
-            duration = 4.2 if i == 0 else (3.8 if i == min(4, len(beats) - 1) else 3.2)
+            duration = 4.2 if i == 0 else (3.8 if i == len(beats) - 1 else 3.2)
             headline = beat[:36]
             body = (brand_notes or "品牌印象 · AI 成片")[:60]
-            hint = "品牌框开场" if i == 0 else ("品牌框收束" if i == min(4, len(beats) - 1) else "品牌框卖点")
+            hint = (
+                "品牌框开场"
+                if i == 0
+                else ("品牌框收束" if i == len(beats) - 1 else "品牌框卖点")
+            )
         else:
             duration = 4.0 if i == 0 else 3.5
             headline = beat[:40]
             body = (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]
             hint = "底部口播字幕条滑入"
+        if mats:
+            kind = mats[i % len(mats)]["kind"]
+            hint = "用户短视频素材" if kind == "video" else "用户图片素材"
         scenes.append(
             Scene(
                 id=new_id("sc"),

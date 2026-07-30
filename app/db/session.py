@@ -117,5 +117,14 @@ def _ensure_video_job_columns(engine: Engine) -> None:
             alters.append(
                 "ALTER TABLE video_jobs ADD COLUMN published_at DATETIME"
             )
+        if "materials_json" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN materials_json TEXT"
+            )
+        if "auto_generate_scene_images" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN auto_generate_scene_images "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
         for sql in alters:
             conn.execute(text(sql))

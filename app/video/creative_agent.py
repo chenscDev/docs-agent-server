@@ -109,6 +109,7 @@ def iter_creative_plan_sse(
     template_id: TemplateId = "talking-captions",
     brand_notes: str = "",
     knowledge_hint: str = "",
+    materials: list[dict[str, Any]] | None = None,
 ) -> Iterator[str]:
     """
     流式推送分镜规划过程（不依赖会话表，供 home 创作页使用）。
@@ -142,12 +143,15 @@ def iter_creative_plan_sse(
             yield emit("cancelled", {"message": "已取消"})
             return
 
+        mats = materials or []
         # 先推送规则骨架，再（可选）用最终分镜覆盖——保证弱网也有反馈
         draft = plan_storyboard(
             prompt,
             template_id=template_id,
             brand_notes=brand_notes,
             knowledge_hint="",
+            materials=mats,
+            prefer_rules=True,
         )
         for scene in draft.scenes:
             if cancel_ev.is_set():
@@ -158,14 +162,19 @@ def iter_creative_plan_sse(
                 {"scene": scene.model_dump(mode="json"), "progress": 0.2 + 0.1 * scene.index},
             )
 
-        # 若有知识库约束，再规划一版最终稿并强制标来源
+        # 最终稿：知识库 / 素材约束 refining
         final = draft
-        if knowledge_hint.strip():
+        need_refine = bool(knowledge_hint.strip()) or bool(mats)
+        if need_refine:
             yield emit(
                 "stage",
                 {
                     "stage": "scripting",
-                    "message": "结合品牌/知识库约束 refining…",
+                    "message": (
+                        "结合素材与知识库规划分镜…"
+                        if mats
+                        else "结合品牌/知识库约束 refining…"
+                    ),
                     "progress": 0.55,
                 },
             )
@@ -174,6 +183,7 @@ def iter_creative_plan_sse(
                 template_id=template_id,
                 brand_notes=brand_notes,
                 knowledge_hint=knowledge_hint,
+                materials=mats,
             )
             refs = refs_from_knowledge_hint(knowledge_hint)
             if refs:

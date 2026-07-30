@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.ids import new_id
 from app.db.models import VideoJob
+from app.video.materials import normalize_materials
 from app.video.planner import patch_storyboard, plan_storyboard, refine_scene
 from app.video.renderer import render_storyboard_to_mp4
 from app.video.schema import Storyboard, TemplateId, validate_storyboard
@@ -41,6 +42,10 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
         "parentJobId": job.parent_job_id,
         "knowledgeBaseId": job.knowledge_base_id,
         "storyboard": storyboard,
+        "materials": _job_materials(job),
+        "autoGenerateSceneImages": bool(
+            getattr(job, "auto_generate_scene_images", 0)
+        ),
         "outputUrl": job.output_url,
         "coverUrl": job.cover_url,
         "durationSec": job.duration_sec,
@@ -74,6 +79,19 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
     return data
 
 
+def _job_materials(job: VideoJob) -> list[dict[str, str]]:
+    """从任务读取规范化素材列表。"""
+    raw = getattr(job, "materials_json", None)
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return normalize_materials(data)
+
 
 def create_job(
     db: Session,
@@ -84,9 +102,12 @@ def create_job(
     parent_job_id: str | None = None,
     storyboard: Storyboard | None = None,
     owner_id: str | None = None,
+    materials: list[dict[str, Any]] | None = None,
+    auto_generate_scene_images: bool = False,
 ) -> VideoJob:
     settings = get_settings()
     owner = (owner_id or settings.video_default_owner_id or "").strip() or None
+    mats = normalize_materials(materials)
     job = VideoJob(
         id=new_id("vjob"),
         status="pending",
@@ -99,8 +120,15 @@ def create_job(
         version=1,
         owner_id=owner,
         publish_status="draft",
+        materials_json=json.dumps(mats, ensure_ascii=False) if mats else None,
+        auto_generate_scene_images=1 if auto_generate_scene_images else 0,
     )
     if storyboard is not None:
+        # 若客户端分镜未带素材，用 materials 补齐
+        if mats:
+            from app.video.materials import attach_materials_to_scenes
+
+            storyboard = attach_materials_to_scenes(storyboard, mats)
         job.storyboard_json = json.dumps(
             storyboard.to_public_dict(),
             ensure_ascii=False,
@@ -470,10 +498,12 @@ def run_job_pipeline(job_id: str) -> None:
 
                 refs = resolve_knowledge_refs(db, job.knowledge_base_id)
                 hint = format_knowledge_hint(refs)
+                mats = _job_materials(job)
                 board = plan_storyboard(
                     job.prompt,
                     template_id=job.template_id,  # type: ignore[arg-type]
                     knowledge_hint=hint,
+                    materials=mats,
                 )
                 if refs:
                     board = apply_knowledge_sources(board, refs)
@@ -496,6 +526,43 @@ def run_job_pipeline(job_id: str) -> None:
                 board = validate_storyboard(json.loads(job.storyboard_json))
                 job.duration_sec = board.total_duration_sec
                 job.title = job.title or board.title
+                db.commit()
+
+            if cancelled():
+                job.status = "cancelled"
+                db.commit()
+                return
+
+            # 1.5) 可选：按画面说明自动配图（已有 image/video 的镜跳过）
+            if int(getattr(job, "auto_generate_scene_images", 0) or 0):
+                from app.video.scene_image import fill_missing_scene_images
+
+                def report_t2i(message: str, progress: float) -> None:
+                    if cancelled():
+                        return
+                    job.progress = float(progress)
+                    job.stage_message = (message or "")[:500]
+                    try:
+                        db.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("写入生图进度失败: %s", exc)
+                        db.rollback()
+
+                job.status = "scripting"
+                job.stage_message = "按画面说明生成分镜配图…"
+                job.progress = 0.42
+                db.commit()
+                board = fill_missing_scene_images(
+                    board,
+                    on_progress=report_t2i,
+                    cancel_check=cancelled,
+                )
+                job.storyboard_json = json.dumps(
+                    board.to_public_dict(),
+                    ensure_ascii=False,
+                )
+                job.stage_message = "配图完成，开始渲染"
+                job.progress = 0.48
                 db.commit()
 
             if cancelled():

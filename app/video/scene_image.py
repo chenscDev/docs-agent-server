@@ -229,3 +229,60 @@ def _minimal_png_bytes(width: int, height: int, rgb: tuple[int, int, int]) -> by
         + chunk(b"IDAT", compressed)
         + chunk(b"IEND", b"")
     )
+
+
+def fill_missing_scene_images(
+    board: Any,
+    *,
+    on_progress: Any | None = None,
+    cancel_check: Any | None = None,
+) -> Any:
+    """
+    为缺少 imageUrl/videoUrl 的镜头按 visualHint 自动配图。
+    已有素材的镜头跳过；单镜失败不中断整板。
+    """
+    from app.video.schema import Scene, Storyboard, validate_storyboard
+
+    sb = validate_storyboard(board) if not isinstance(board, Storyboard) else board
+    targets: list[tuple[int, Scene]] = []
+    for i, sc in enumerate(sb.scenes):
+        has_media = bool((sc.imageUrl or "").strip() or (sc.videoUrl or "").strip())
+        if has_media:
+            continue
+        if not ((sc.visualHint or "").strip() or (sc.headline or "").strip()):
+            continue
+        targets.append((i, sc))
+
+    if not targets:
+        return sb
+
+    total = len(targets)
+    updated = list(sb.scenes)
+    for n, (idx, sc) in enumerate(targets):
+        if cancel_check and cancel_check():
+            raise RuntimeError("CANCELLED")
+        if on_progress:
+            try:
+                on_progress(
+                    f"按画面说明生图 {n + 1}/{total}：{(sc.headline or '')[:20]}",
+                    0.40 + 0.08 * (n / max(1, total)),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            out = generate_scene_image(
+                visual_hint=sc.visualHint or "",
+                headline=sc.headline or "",
+                body=sc.body or "",
+            )
+            url = (out.get("url") or "").strip()
+            if url:
+                updated[idx] = sc.model_copy(update={"imageUrl": url, "videoUrl": ""})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "自动生图失败 scene=%s: %s",
+                sc.id,
+                exc,
+            )
+
+    return sb.model_copy(update={"scenes": updated})

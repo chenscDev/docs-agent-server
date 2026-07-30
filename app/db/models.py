@@ -177,6 +177,12 @@ class VideoJob(Base):
     # 支持多选：逗号分隔多个知识库 ID
     knowledge_base_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     storyboard_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 创作素材列表 JSON：[{url, kind}]，规划分镜时绑定到镜头
+    materials_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 是否在规划后按画面说明自动文生图（0/1）
+    auto_generate_scene_images: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     output_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     output_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     cover_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
