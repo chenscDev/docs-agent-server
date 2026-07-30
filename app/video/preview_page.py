@@ -160,7 +160,7 @@ def build_preview_html() -> str:
       bottom.style.display = 'block';
       bottom.style.background = accent;
       badge.style.display = 'block';
-      badge.textContent = String(Number(sc.index) + 1);
+      badge.textContent = String(Number(sc.index) + 1).padStart(2, '0');
       bar.style.display = 'flex';
       bar.style.flexDirection = 'column';
       bar.style.alignItems = 'center';
@@ -173,8 +173,11 @@ def build_preview_html() -> str:
       bar.style.background = 'rgba(0,0,0,0.55)';
       bar.style.borderLeft = '0';
       bar.style.borderRadius = '12px';
+      bar.style.transform = 'none';
       headline.style.fontSize = '28px';
       headline.style.textAlign = 'center';
+      headline.style.letterSpacing = '1px';
+      body.style.textAlign = 'center';
     } else if (tid === 'brand-intro') {
       var dot = document.getElementById('brandDot');
       var frame = document.getElementById('frameBox');
@@ -193,18 +196,22 @@ def build_preview_html() -> str:
       bar.style.height = 'auto';
       bar.style.background = 'transparent';
       bar.style.borderLeft = '0';
-      headline.style.fontSize = '24px';
+      bar.style.transform = 'none';
+      headline.style.fontSize = Number(sc.index) === 0 ? '26px' : '24px';
+      headline.style.textAlign = 'center';
+      headline.style.letterSpacing = '1.2px';
+      body.style.textAlign = 'center';
     } else {
-      var cap = state.props.captionPosition || 'bottom';
+      var capPos = state.props.captionPosition || 'bottom';
       bar.style.display = 'block';
       bar.style.left = '0';
       bar.style.right = '0';
       bar.style.height = '28%';
       bar.style.top = 'auto';
       bar.style.bottom = 'auto';
-      if (cap === 'top') {
+      if (capPos === 'top') {
         bar.style.top = '0';
-      } else if (cap === 'center') {
+      } else if (capPos === 'center') {
         bar.style.top = '36%';
       } else {
         bar.style.bottom = '0';
@@ -214,14 +221,50 @@ def build_preview_html() -> str:
       bar.style.borderRadius = '0';
       headline.style.fontSize = '22px';
       headline.style.textAlign = 'left';
+      headline.style.letterSpacing = '0.5px';
       body.style.textAlign = 'left';
     }
 
     placeLogo();
 
-    var fadeFrames = Math.max(1, Math.round(fps() * (tid === 'brand-intro' ? 0.45 : 0.2)));
-    var opacity = Math.min(1, hit.local / fadeFrames);
+    var fadeFrames = Math.max(1, Math.round(fps() * (
+      tid === 'brand-intro' ? (Number(sc.index) === 0 ? 0.55 : 0.4) :
+      tid === 'kinetic-text' ? 0.12 : 0.28
+    )));
+    var local = hit.local;
+    var opacity = Math.min(1, local / fadeFrames);
+    var transform = 'none';
+    if (tid === 'kinetic-text') {
+      var popT = Math.min(1, local / Math.max(1, Math.round(fps() * 0.18)));
+      var scale = 0.78 + 0.22 * popT;
+      var rise = 36 * (1 - popT);
+      transform = 'translateY(' + rise + 'px) scale(' + scale + ')';
+    } else if (tid === 'brand-intro') {
+      var isFirst = Number(sc.index) === 0;
+      var isLast = Number(sc.index) === (scenes().length - 1);
+      var enterT = Math.min(1, local / fadeFrames);
+      var scaleB = (isFirst ? 0.72 : 0.92) + (1 - (isFirst ? 0.72 : 0.92)) * enterT;
+      if (isLast) {
+        var sceneDur = Math.max(1, Math.round((Number(sc.durationSec) || 3) * fps()));
+        var exitStart = Math.floor(sceneDur * 0.62);
+        if (local >= exitStart) {
+          var exitT = Math.min(1, (local - exitStart) / Math.max(1, sceneDur - exitStart));
+          opacity = opacity * (1 - 0.85 * exitT);
+          scaleB = scaleB * (1 - 0.1 * exitT);
+        }
+      }
+      transform = 'scale(' + scaleB + ')';
+    } else {
+      // talking-captions：字幕条滑入感（用 translateY 近似）
+      var slideT = Math.min(1, local / fadeFrames);
+      var slide = (1 - slideT) * 28;
+      var capMotion = state.props.captionPosition || 'bottom';
+      if (capMotion === 'top') slide = -slide;
+      else if (capMotion === 'center') slide = slide * 0.4;
+      bar.style.transform = 'translateY(' + slide + 'px)';
+    }
     content.style.opacity = String(opacity);
+    content.style.transform = transform;
     document.getElementById('sceneLabel').textContent =
       '#' + (Number(sc.index) + 1) + ' · ' + (state.props.title || '预览');
     document.getElementById('frameLabel').textContent =

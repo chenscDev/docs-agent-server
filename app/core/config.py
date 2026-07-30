@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     video_bgm_file: str = ""  # 可选本地 mp3/wav；空则合成粉噪氛围
     # 可选：渲染后额外拷贝到 Nginx 静态目录（一般不必，nginx 已反代 uvicorn）
     video_cdn_mirror_dir: str = ""
+    # 画面说明 → 文生图（通义万相）；无 Key / 失败时回退占位图
+    video_t2i_enabled: bool = True
+    video_t2i_model: str = "wanx-v1"
+    video_t2i_size: str = "720*1280"
 
 
 @lru_cache

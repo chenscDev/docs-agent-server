@@ -31,6 +31,7 @@ from app.video.service import (
     create_job,
     delete_job,
     duplicate_job,
+    export_multi_ratio,
     get_job,
     job_to_dict,
     list_jobs,
@@ -86,6 +87,26 @@ class RemixBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class ExportRatiosBody(BaseModel):
+    """一键多比例导出请求。"""
+
+    ratios: list[str] | None = None
+    auto_start: bool = Field(default=True, alias="autoStart")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class GenerateSceneImageBody(BaseModel):
+    """根据画面说明生成分镜配图。"""
+
+    visual_hint: str = Field(default="", alias="visualHint", max_length=200)
+    headline: str = Field(default="", max_length=80)
+    body: str = Field(default="", max_length=200)
+    size: str | None = Field(default=None, max_length=32)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class CancelJobBody(BaseModel):
     job_id: str | None = Field(default=None, alias="jobId")
     stream_id: str | None = Field(default=None, alias="streamId")
@@ -124,6 +145,24 @@ async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
     except ValueError as exc:
         raise_api_error(400, "ASSET_INVALID", str(exc))
     return saved
+
+
+@router.post("/scenes/generate-image")
+def post_generate_scene_image(body: GenerateSceneImageBody) -> dict[str, Any]:
+    """根据画面说明（visualHint）文生图，落盘后返回素材 URL。"""
+    from app.video.scene_image import generate_scene_image
+
+    try:
+        return generate_scene_image(
+            visual_hint=body.visual_hint,
+            headline=body.headline,
+            body=body.body,
+            size=(body.size or "").strip() or "720*1280",
+        )
+    except ValueError as exc:
+        raise_api_error(400, "SCENE_IMAGE_INVALID", str(exc)[:200])
+    except Exception as exc:  # noqa: BLE001
+        raise_api_error(500, "SCENE_IMAGE_FAILED", str(exc)[:200])
 
 
 @router.get("/jobs")
@@ -225,6 +264,33 @@ def post_duplicate(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]
     except Exception as exc:  # noqa: BLE001
         raise_api_error(400, "DUPLICATE_FAILED", str(exc)[:200])
     return job_to_dict(child)
+
+
+@router.post("/jobs/{job_id}/export-ratios")
+def post_export_ratios(
+    job_id: str,
+    body: ExportRatiosBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """同脚本一键导出其他画幅（默认补齐 9:16 / 1:1 / 16:9）。"""
+    source = get_job(db, job_id)
+    if source is None:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    try:
+        children = export_multi_ratio(
+            db,
+            source,
+            ratios=body.ratios,
+            auto_start=body.auto_start,
+        )
+    except ValueError as exc:
+        raise_api_error(400, "EXPORT_RATIOS_FAILED", str(exc)[:200])
+    except Exception as exc:  # noqa: BLE001
+        raise_api_error(400, "EXPORT_RATIOS_FAILED", str(exc)[:200])
+    return {
+        "parentJobId": job_id,
+        "items": [job_to_dict(c) for c in children],
+    }
 
 
 @router.post("/jobs/{job_id}/publish")

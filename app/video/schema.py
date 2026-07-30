@@ -27,6 +27,12 @@ class Scene(BaseModel):
     imageUrl: str = Field("", max_length=500)
     # 分镜短视频素材；有值时优先于 imageUrl
     videoUrl: str = Field("", max_length=500)
+    # 知识库引用：编号（与 hint 中 [n] 对应）
+    sourceIndex: int | None = Field(None, ge=1, le=32)
+    # 知识库 chunk id（便于端上跳转原文）
+    sourceChunkId: str = Field("", max_length=64)
+    # 展示用来源标签，如「[1] 品牌手册」
+    sourceLabel: str = Field("", max_length=120)
 
 
 class Storyboard(BaseModel):
@@ -81,7 +87,7 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "talking-captions",
         "name": "口播字幕条",
-        "description": "底部字幕条 + 左侧强调色，适合一句话口播解说",
+        "description": "字幕条滑入 + 左侧强调色，适合一句话口播解说",
         "coverColor": "#0F172A",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "soft-pink",
@@ -89,7 +95,7 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "kinetic-text",
         "name": "图文快闪",
-        "description": "顶部色带 + 大号标题弹出，适合卖点快切罗列",
+        "description": "色带 + 标题弹入上移，适合卖点快切罗列",
         "coverColor": "#1E1B4B",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "bright-pulse",
@@ -97,7 +103,7 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "brand-intro",
         "name": "品牌片头",
-        "description": "居中描边品牌框 + 渐入，适合开场品牌印象",
+        "description": "首镜放大入场、末镜收束淡出，适合开场品牌印象",
         "coverColor": "#022C22",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "warm-pad",

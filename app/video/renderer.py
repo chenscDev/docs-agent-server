@@ -678,7 +678,7 @@ def _build_scene_drawtext_vf(
             f"drawbox=x=0:y={height - 16}:w={width}:h=16:color={accent}@0.95:t=fill"
         )
         parts.append(
-            f"drawtext=fontfile='{font_q}':text='{scene.index + 1}':"
+            f"drawtext=fontfile='{font_q}':text='{scene.index + 1:02d}':"
             f"fontsize=28:fontcolor=white:x=28:y=28"
         )
         parts.append(
@@ -809,40 +809,48 @@ def _make_scene_card_png(
 
     # 模板装饰差异
     if tid == "kinetic-text":
-        # 斜切色块 + 左上角编号
-        draw.polygon(
-            [(0, 0), (width, 0), (width, int(height * 0.22)), (0, int(height * 0.32))],
-            fill=(*accent_rgb, 220) if transparent_bg else accent_rgb,
+        # 与 Remotion 对齐：矩形顶带 + 底条 + 左上镜号
+        top_h = int(height * 0.20)
+        draw.rectangle(
+            [0, 0, width, top_h],
+            fill=(*accent_rgb, 240) if transparent_bg else accent_rgb,
         )
         draw.rectangle(
-            [0, height - 18, width, height],
-            fill=(*accent_rgb, 220) if transparent_bg else accent_rgb,
+            [0, height - 16, width, height],
+            fill=(*accent_rgb, 240) if transparent_bg else accent_rgb,
         )
         draw.text(
             (32, 36),
-            f"#{scene.index + 1}",
+            f"{scene.index + 1:02d}",
             fill=(255, 255, 255, 255) if transparent_bg else (255, 255, 255),
             font=font_small,
         )
         title_y = int(height * 0.42)
         body_y = int(height * 0.58)
     elif tid == "brand-intro":
-        # 居中品牌框
+        # 居中品牌框；首镜略加大色点
+        is_first = int(getattr(scene, "index", 0) or 0) == 0
         margin = int(width * 0.1)
-        box = [margin, int(height * 0.32), width - margin, int(height * 0.68)]
+        box = [margin, int(height * 0.30), width - margin, int(height * 0.70)]
         outline = (*accent_rgb, 255) if transparent_bg else accent_rgb
         try:
             draw.rounded_rectangle(box, radius=28, outline=outline, width=6)
         except AttributeError:
             draw.rectangle(box, outline=outline, width=6)
+        dot_r = 36 if is_first else 28
         draw.ellipse(
-            [width // 2 - 28, int(height * 0.22) - 28, width // 2 + 28, int(height * 0.22) + 28],
+            [
+                width // 2 - dot_r,
+                int(height * 0.20) - dot_r,
+                width // 2 + dot_r,
+                int(height * 0.20) + dot_r,
+            ],
             fill=(*accent_rgb, 255) if transparent_bg else accent_rgb,
         )
         title_y = int(height * 0.42)
         body_y = int(height * 0.55)
     else:
-        # talking-captions：字幕条（上/中/下）
+        # talking-captions：字幕条（上/中/下）+ 左对齐文案
         bar_h = int(height * 0.28)
         bar_fill = (0, 0, 0, 220) if transparent_bg else (0, 0, 0)
         accent_fill = (*accent_rgb, 255) if transparent_bg else accent_rgb
@@ -855,7 +863,7 @@ def _make_scene_card_png(
         else:
             bar_y0, bar_y1 = height - bar_h, height
         draw.rectangle([0, bar_y0, width, bar_y1], fill=bar_fill)
-        draw.rectangle([0, bar_y0, 12, bar_y1], fill=accent_fill)
+        draw.rectangle([0, bar_y0, 14, bar_y1], fill=accent_fill)
         title_y = bar_y0 + 36
         body_y = bar_y0 + 100
 
@@ -867,7 +875,11 @@ def _make_scene_card_png(
             return
         bbox = draw.textbbox((0, 0), text, font=font)
         tw = bbox[2] - bbox[0]
-        x = max(16, (width - tw) // 2)
+        # 口播模板左对齐；其余居中
+        if tid == "talking-captions":
+            x = 36
+        else:
+            x = max(16, (width - tw) // 2)
         if boxed and tid != "talking-captions":
             pad = 16
             draw.rectangle(

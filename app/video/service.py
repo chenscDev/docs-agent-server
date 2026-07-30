@@ -6,6 +6,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -158,8 +159,77 @@ def duplicate_job(db: Session, source: VideoJob) -> VideoJob:
     return child
 
 
+_ALLOWED_ASPECTS = ("9:16", "16:9", "1:1")
+
+
+def export_multi_ratio(
+    db: Session,
+    source: VideoJob,
+    *,
+    ratios: list[str] | None = None,
+    auto_start: bool = True,
+) -> list[VideoJob]:
+    """
+    同脚本一键多比例导出：为每个目标画幅创建子任务并（可选）入队重渲。
+
+    默认导出与当前不同的另外两种比例；当前比例本身不重复创建。
+    """
+    if not source.storyboard_json:
+        raise ValueError("源任务尚无分镜，无法多比例导出")
+    board = validate_storyboard(json.loads(source.storyboard_json))
+    current = board.aspectRatio
+    wanted = ratios or [r for r in _ALLOWED_ASPECTS if r != current]
+    cleaned: list[str] = []
+    for raw in wanted:
+        r = str(raw or "").strip()
+        if r in _ALLOWED_ASPECTS and r not in cleaned:
+            cleaned.append(r)
+    if not cleaned:
+        raise ValueError("没有可导出的目标比例")
+
+    from app.video.render_queue import enqueue_video_job
+
+    children: list[VideoJob] = []
+    for ratio in cleaned:
+        if ratio == current:
+            continue
+        child_board = board.model_copy(
+            update={
+                "version": 1,
+                "aspectRatio": ratio,  # type: ignore[arg-type]
+                "title": f"{board.title}（{ratio}）",
+            }
+        )
+        child = create_job(
+            db,
+            prompt=source.prompt,
+            template_id=source.template_id,  # type: ignore[arg-type]
+            knowledge_base_id=source.knowledge_base_id,
+            parent_job_id=source.id,
+            storyboard=child_board,
+            owner_id=source.owner_id,
+        )
+        child.stage_message = f"多比例导出 {ratio}，等待渲染"
+        db.commit()
+        db.refresh(child)
+        if auto_start:
+            enqueue_video_job(child.id)
+            child.stage_message = f"多比例导出 {ratio} 已入队"
+            db.commit()
+            db.refresh(child)
+        children.append(child)
+    if not children:
+        raise ValueError("目标比例与当前成片相同，无需导出")
+    return children
+
+
 def publish_job(db: Session, job: VideoJob) -> VideoJob:
-    """标记作品已发布（长期发布对接占位）。"""
+    """
+    标记作品为已发布（仅改库内 publish_status / published_at）。
+
+    说明：当前不对接抖音 / 视频号等外部渠道，属于作品库状态位；
+    后续接开放平台时再在此触发实际上传。
+    """
     from datetime import datetime, timezone
 
     if job.status != "ready" or not job.output_url:
@@ -192,7 +262,7 @@ def request_job_cancel(db: Session, job_id: str) -> VideoJob | None:
 
 def resolve_knowledge_hint(db: Session, knowledge_base_id: str | None) -> str:
     """供 API / pipeline 复用：从知识库抽若干 chunk 作为创作约束。"""
-    return _kb_hint(db, knowledge_base_id)
+    return format_knowledge_hint(resolve_knowledge_refs(db, knowledge_base_id))
 
 
 def normalize_knowledge_base_ids(
@@ -216,28 +286,112 @@ def normalize_knowledge_base_ids(
     return ",".join(ids[:8])
 
 
-def _kb_hint(db: Session, knowledge_base_id: str | None) -> str:
-    """可选：从一个或多个 KB 取若干 chunk 作品牌约束（轻量，不跑完整 Agent）。"""
+def resolve_knowledge_refs(
+    db: Session, knowledge_base_id: str | None
+) -> list[dict[str, Any]]:
+    """
+    拉取知识库片段并编号，供分镜强制引用。
+
+    每项：index / chunkId / documentId / documentTitle / snippet
+    """
     if not knowledge_base_id:
-        return ""
+        return []
     try:
-        from app.db.models import Chunk
+        from app.db.models import Chunk, Document
 
         ids = [p.strip() for p in knowledge_base_id.split(",") if p.strip()][:5]
-        texts: list[str] = []
+        refs: list[dict[str, Any]] = []
         for kid in ids:
             rows = db.scalars(
                 select(Chunk)
                 .where(Chunk.knowledge_base_id == kid)
-                .limit(3)
+                .limit(4)
             ).all()
-            texts.extend(r.content.strip()[:200] for r in rows if r.content)
-            if len(texts) >= 8:
-                break
-        return "\n".join(texts[:8])
+            for row in rows:
+                if not (row.content or "").strip():
+                    continue
+                doc = db.get(Document, row.document_id)
+                title = (doc.title if doc else "") or "知识库文档"
+                refs.append(
+                    {
+                        "index": len(refs) + 1,
+                        "chunkId": row.id,
+                        "documentId": row.document_id,
+                        "documentTitle": title[:80],
+                        "snippet": row.content.strip()[:220],
+                    }
+                )
+                if len(refs) >= 8:
+                    return refs
+        return refs
     except Exception as exc:  # noqa: BLE001
-        logger.debug("kb hint skip: %s", exc)
+        logger.debug("kb refs skip: %s", exc)
+        return []
+
+
+def format_knowledge_hint(refs: list[dict[str, Any]]) -> str:
+    """把编号引用格式化为规划用约束文本。"""
+    if not refs:
         return ""
+    lines: list[str] = []
+    for r in refs:
+        title = str(r.get("documentTitle") or "知识库文档")
+        snip = str(r.get("snippet") or "").strip()
+        idx = int(r.get("index") or 0)
+        lines.append(f"[{idx}] 《{title}》：{snip}")
+    return "\n".join(lines)
+
+
+def refs_from_knowledge_hint(hint: str) -> list[dict[str, Any]]:
+    """从格式化 hint 反解出引用列表（用于 plan SSE 等仅有文本的场景）。"""
+    text = (hint or "").strip()
+    if not text:
+        return []
+    refs: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        m = re.match(r"^\s*\[(\d+)\]\s*(?:《([^》]*)》[：:]?)?\s*(.+)$", line)
+        if not m:
+            continue
+        refs.append(
+            {
+                "index": int(m.group(1)),
+                "chunkId": "",
+                "documentId": "",
+                "documentTitle": (m.group(2) or "知识库文档").strip()[:80] or "知识库文档",
+                "snippet": (m.group(3) or "").strip()[:220],
+            }
+        )
+    return refs
+
+
+def apply_knowledge_sources(
+    board: Storyboard, refs: list[dict[str, Any]]
+) -> Storyboard:
+    """
+    强制给每个镜头打上来源标签。
+
+    - 若 LLM 已写 sourceIndex，按编号映射；
+    - 否则按镜头顺序轮转分配引用。
+    """
+    if not refs:
+        return board
+    by_idx = {int(r["index"]): r for r in refs if r.get("index")}
+    data = board.model_dump()
+    for i, sc in enumerate(data.get("scenes") or []):
+        raw_idx = sc.get("sourceIndex")
+        ref = None
+        if raw_idx is not None:
+            try:
+                ref = by_idx.get(int(raw_idx))
+            except (TypeError, ValueError):
+                ref = None
+        if ref is None:
+            ref = refs[i % len(refs)]
+        sc["sourceIndex"] = int(ref["index"])
+        sc["sourceChunkId"] = str(ref.get("chunkId") or "")
+        title = str(ref.get("documentTitle") or "知识库")
+        sc["sourceLabel"] = f"[{ref['index']}] {title}"[:120]
+    return validate_storyboard(data)
 
 
 def delete_job(db: Session, job_id: str) -> bool:
@@ -314,12 +468,15 @@ def run_job_pipeline(job_id: str) -> None:
                     db.commit()
                     return
 
-                hint = _kb_hint(db, job.knowledge_base_id)
+                refs = resolve_knowledge_refs(db, job.knowledge_base_id)
+                hint = format_knowledge_hint(refs)
                 board = plan_storyboard(
                     job.prompt,
                     template_id=job.template_id,  # type: ignore[arg-type]
                     knowledge_hint=hint,
                 )
+                if refs:
+                    board = apply_knowledge_sources(board, refs)
                 job.storyboard_json = json.dumps(
                     board.to_public_dict(),
                     ensure_ascii=False,
@@ -328,7 +485,12 @@ def run_job_pipeline(job_id: str) -> None:
                 job.version = board.version
                 job.duration_sec = board.total_duration_sec
                 job.progress = 0.4
-                job.stage_message = "分镜完成，开始渲染"
+                if refs:
+                    job.stage_message = (
+                        f"分镜完成（已标注 {len(refs)} 条知识库来源），开始渲染"
+                    )
+                else:
+                    job.stage_message = "分镜完成，开始渲染"
                 db.commit()
             else:
                 board = validate_storyboard(json.loads(job.storyboard_json))

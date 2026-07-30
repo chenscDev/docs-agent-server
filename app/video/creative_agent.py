@@ -18,8 +18,9 @@ from app.core.ids import new_id
 from app.core.llm import LLMClient
 from app.video.events import format_sse as format_video_sse
 from app.video.events import make_video_event
-from app.video.planner import plan_storyboard, refine_scene
+from app.video.planner import patch_storyboard, plan_storyboard, refine_scene
 from app.video.schema import Storyboard, TemplateId, validate_storyboard
+from app.video.service import apply_knowledge_sources, refs_from_knowledge_hint
 
 logger = logging.getLogger(__name__)
 
@@ -65,8 +66,32 @@ CREATIVE_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "apply_patch",
+            "description": (
+                "对当前分镜做结构化 patch（浅合并）。"
+                "可改 title/bgmTrackId/ttsVoice/logoUrl/captionPosition，"
+                "或 scenes（按 id 合并字段，或整表替换）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patches": {
+                        "type": "object",
+                        "description": "要合并进分镜的字段",
+                    },
+                },
+                "required": ["patches"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "submit_render",
-            "description": "将当前分镜提交为渲染任务并入队（返回 jobId）",
+            "description": (
+                "将当前分镜提交为渲染任务并入队。"
+                "用户说「去生成 / 渲染 / 出片 / 开始做视频」时必须调用。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -133,7 +158,7 @@ def iter_creative_plan_sse(
                 {"scene": scene.model_dump(mode="json"), "progress": 0.2 + 0.1 * scene.index},
             )
 
-        # 若有知识库约束，再规划一版最终稿
+        # 若有知识库约束，再规划一版最终稿并强制标来源
         final = draft
         if knowledge_hint.strip():
             yield emit(
@@ -150,6 +175,9 @@ def iter_creative_plan_sse(
                 brand_notes=brand_notes,
                 knowledge_hint=knowledge_hint,
             )
+            refs = refs_from_knowledge_hint(knowledge_hint)
+            if refs:
+                final = apply_knowledge_sources(final, refs)
 
         if cancel_ev.is_set():
             yield emit("cancelled", {"message": "已取消"})
@@ -225,6 +253,9 @@ def iter_creative_agent_sse(
                 template_id=template_id,
                 knowledge_hint=knowledge_hint,
             )
+            refs = refs_from_knowledge_hint(knowledge_hint)
+            if refs:
+                board = apply_knowledge_sources(board, refs)
             yield emit(
                 "tool_result",
                 {
@@ -243,7 +274,10 @@ def iter_creative_agent_sse(
 
         system = (
             "你是移动端 AI 短视频创作助手。"
-            "优先调用 plan_storyboard 或 refine_scene；不要编造渲染结果。"
+            "可用工具：plan_storyboard / refine_scene / apply_patch / submit_render。"
+            "规划或改镜后，若用户要求出片/渲染/生成视频，必须调用 submit_render，不要只口头说已提交。"
+            "批量改字段（配乐、音色、多镜文案）优先 apply_patch；单镜自然语言改写用 refine_scene。"
+            "不要编造渲染结果；submit_render 返回的 jobId 才是真实任务。"
             "回答简洁，中文。"
         )
         messages: list[dict[str, Any]] = [
@@ -312,6 +346,9 @@ def iter_creative_agent_sse(
                             brand_notes=str(args.get("brandNotes") or ""),
                             knowledge_hint=knowledge_hint,
                         )
+                        refs = refs_from_knowledge_hint(knowledge_hint)
+                        if refs:
+                            board = apply_knowledge_sources(board, refs)
                         summary = {"sceneCount": len(board.scenes), "title": board.title}
                         yield emit(
                             "storyboard",
@@ -324,6 +361,19 @@ def iter_creative_agent_sse(
                             instruction=str(args.get("instruction") or ""),
                         )
                         summary = {"version": board.version}
+                        yield emit(
+                            "storyboard",
+                            {"storyboard": board.to_public_dict()},
+                        )
+                    elif name == "apply_patch" and board is not None:
+                        patches = args.get("patches")
+                        if not isinstance(patches, dict):
+                            raise ValueError("patches 必须是对象")
+                        board = patch_storyboard(board, patches=patches)
+                        summary = {
+                            "version": board.version,
+                            "keys": list(patches.keys())[:12],
+                        }
                         yield emit(
                             "storyboard",
                             {"storyboard": board.to_public_dict()},

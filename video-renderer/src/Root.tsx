@@ -33,6 +33,14 @@ export type StoryboardProps = {
   captionPosition?: 'bottom' | 'top' | 'center';
 };
 
+type SceneCompProps = {
+  scene: Scene;
+  captionPosition?: StoryboardProps['captionPosition'];
+  sceneCount: number;
+  isFirst: boolean;
+  isLast: boolean;
+};
+
 function SceneBackground({scene}: {scene: Scene}) {
   const bg = scene.bgColor || '#0F172A';
   const videoSrc = (scene.videoUrl || '').trim();
@@ -99,22 +107,49 @@ function LogoBadge({
   return <Img src={src} style={style} />;
 }
 
-/** 口播字幕条：可切换上/中/下 + 左侧强调色 */
-const TalkingCaptionsScene: React.FC<{
-  scene: Scene;
-  captionPosition?: StoryboardProps['captionPosition'];
-}> = ({scene, captionPosition = 'bottom'}) => {
+/**
+ * 口播字幕条：字幕条自下/上滑入 + 左侧强调色，偏解说节奏
+ */
+const TalkingCaptionsScene: React.FC<SceneCompProps> = ({
+  scene,
+  captionPosition = 'bottom',
+}) => {
   const frame = useCurrentFrame();
   const {fps, height} = useVideoConfig();
-  const opacity = Math.min(1, frame / (fps * 0.25));
-  const barH = Math.round(height * 0.28);
   const accent = scene.accentColor || '#38BDF8';
+  const barH = Math.round(height * 0.28);
+  const slideIn = Math.max(1, Math.round(fps * 0.28));
+  const opacity = interpolate(frame, [0, slideIn], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const slide =
+    captionPosition === 'top'
+      ? interpolate(frame, [0, slideIn], [-barH * 0.45, 0], {
+          extrapolateRight: 'clamp',
+        })
+      : captionPosition === 'center'
+        ? interpolate(frame, [0, slideIn], [24, 0], {
+            extrapolateRight: 'clamp',
+          })
+        : interpolate(frame, [0, slideIn], [barH * 0.45, 0], {
+            extrapolateRight: 'clamp',
+          });
+  const bodyDelay = Math.round(fps * 0.12);
+  const bodyOpacity = interpolate(
+    frame,
+    [bodyDelay, bodyDelay + slideIn],
+    [0, 1],
+    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+  );
   const barPos: React.CSSProperties =
     captionPosition === 'top'
-      ? {top: 0}
+      ? {top: 0, transform: `translateY(${slide}px)`}
       : captionPosition === 'center'
-        ? {top: Math.round(height * 0.36)}
-        : {bottom: 0};
+        ? {
+            top: Math.round(height * 0.36),
+            transform: `translateY(${slide}px)`,
+          }
+        : {bottom: 0, transform: `translateY(${slide}px)`};
   return (
     <AbsoluteFill>
       <SceneBackground scene={scene} />
@@ -138,6 +173,7 @@ const TalkingCaptionsScene: React.FC<{
             fontSize: 42,
             fontWeight: 700,
             lineHeight: 1.25,
+            letterSpacing: 0.5,
           }}
         >
           {scene.headline}
@@ -148,6 +184,7 @@ const TalkingCaptionsScene: React.FC<{
               marginTop: 12,
               color: 'rgba(255,255,255,0.88)',
               fontSize: 24,
+              opacity: bodyOpacity,
             }}
           >
             {scene.body}
@@ -158,18 +195,37 @@ const TalkingCaptionsScene: React.FC<{
   );
 };
 
-/** 图文快闪：顶部色带 + 大号标题弹出 */
-const KineticTextScene: React.FC<{
-  scene: Scene;
-  captionPosition?: StoryboardProps['captionPosition'];
-}> = ({scene}) => {
+/**
+ * 图文快闪：色带 + 镜号滑入 + 标题弹入上移，偏卖点节奏
+ */
+const KineticTextScene: React.FC<SceneCompProps> = ({scene}) => {
   const frame = useCurrentFrame();
   const {fps, height} = useVideoConfig();
   const accent = scene.accentColor || '#A78BFA';
-  const pop = interpolate(frame, [0, Math.max(1, fps * 0.15)], [0.86, 1], {
+  const popDur = Math.max(1, Math.round(fps * 0.18));
+  const pop = interpolate(frame, [0, popDur], [0.78, 1], {
     extrapolateRight: 'clamp',
   });
-  const opacity = Math.min(1, frame / (fps * 0.12));
+  const rise = interpolate(frame, [0, popDur], [36, 0], {
+    extrapolateRight: 'clamp',
+  });
+  const opacity = interpolate(frame, [0, Math.max(1, fps * 0.1)], [0, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const badgeX = interpolate(frame, [0, popDur], [-40, 0], {
+    extrapolateRight: 'clamp',
+  });
+  const bodyDelay = Math.round(fps * 0.14);
+  const bodyOpacity = interpolate(
+    frame,
+    [bodyDelay, bodyDelay + popDur],
+    [0, 1],
+    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+  );
+  const bodyY = interpolate(frame, [bodyDelay, bodyDelay + popDur], [18, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
   return (
     <AbsoluteFill style={{justifyContent: 'center', alignItems: 'center'}}>
       <SceneBackground scene={scene} />
@@ -181,6 +237,7 @@ const KineticTextScene: React.FC<{
           right: 0,
           height: Math.round(height * 0.2),
           backgroundColor: accent,
+          opacity,
         }}
       />
       <div
@@ -191,6 +248,7 @@ const KineticTextScene: React.FC<{
           right: 0,
           height: 16,
           backgroundColor: accent,
+          opacity,
         }}
       />
       <div
@@ -200,16 +258,18 @@ const KineticTextScene: React.FC<{
           left: 28,
           color: '#fff',
           fontSize: 28,
-          fontWeight: 700,
+          fontWeight: 800,
           opacity,
+          transform: `translateX(${badgeX}px)`,
+          textShadow: '0 2px 8px rgba(0,0,0,0.35)',
         }}
       >
-        {scene.index + 1}
+        {String(scene.index + 1).padStart(2, '0')}
       </div>
       <div
         style={{
           opacity,
-          transform: `scale(${pop})`,
+          transform: `translateY(${rise}px) scale(${pop})`,
           color: '#fff',
           fontSize: 56,
           fontWeight: 800,
@@ -219,6 +279,7 @@ const KineticTextScene: React.FC<{
           backgroundColor: 'rgba(0,0,0,0.55)',
           borderRadius: 12,
           lineHeight: 1.2,
+          letterSpacing: 1,
         }}
       >
         {scene.headline}
@@ -227,8 +288,9 @@ const KineticTextScene: React.FC<{
         <div
           style={{
             marginTop: 24,
-            opacity,
-            color: 'rgba(255,255,255,0.9)',
+            opacity: bodyOpacity,
+            transform: `translateY(${bodyY}px)`,
+            color: 'rgba(255,255,255,0.92)',
             fontSize: 24,
             textAlign: 'center',
             maxWidth: 560,
@@ -244,65 +306,108 @@ const KineticTextScene: React.FC<{
   );
 };
 
-/** 品牌片头：居中描边框 + 顶部色点 */
-const BrandIntroScene: React.FC<{
-  scene: Scene;
-  captionPosition?: StoryboardProps['captionPosition'];
-}> = ({scene}) => {
+/**
+ * 品牌片头：首镜放大入场 / 末镜收束淡出，中间镜稳定框显
+ */
+const BrandIntroScene: React.FC<SceneCompProps> = ({
+  scene,
+  isFirst,
+  isLast,
+}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const accent = scene.accentColor || '#34D399';
-  const opacity = interpolate(frame, [0, Math.max(1, fps * 0.5)], [0, 1], {
+  const sceneFrames = Math.max(1, Math.round(scene.durationSec * fps));
+  const enter = Math.max(1, Math.round(fps * (isFirst ? 0.55 : 0.4)));
+  const opacity = interpolate(frame, [0, enter], [0, 1], {
     extrapolateRight: 'clamp',
   });
+  const scaleFrom = isFirst ? 0.72 : 0.92;
+  const scale = interpolate(frame, [0, enter], [scaleFrom, 1], {
+    extrapolateRight: 'clamp',
+  });
+  const dotScale = interpolate(frame, [0, enter], [0.2, 1], {
+    extrapolateRight: 'clamp',
+  });
+  // 末镜后段收束淡出（相对本镜时长）
+  let exitOpacity = 1;
+  let exitScale = 1;
+  if (isLast) {
+    const exitStart = Math.max(enter, Math.floor(sceneFrames * 0.62));
+    exitOpacity = interpolate(
+      frame,
+      [exitStart, Math.max(exitStart + 1, sceneFrames - 1)],
+      [1, 0.15],
+      {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+    );
+    exitScale = interpolate(
+      frame,
+      [exitStart, Math.max(exitStart + 1, sceneFrames - 1)],
+      [1, 0.9],
+      {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
+    );
+  }
   return (
     <AbsoluteFill style={{justifyContent: 'center', alignItems: 'center'}}>
       <SceneBackground scene={scene} />
       <div
         style={{
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: accent,
-          marginBottom: 28,
-          opacity,
-        }}
-      />
-      <div
-        style={{
-          opacity,
-          width: '80%',
-          maxWidth: 640,
-          border: `6px solid ${accent}`,
-          borderRadius: 28,
-          padding: '48px 36px',
-          boxSizing: 'border-box',
+          opacity: opacity * exitOpacity,
+          transform: `scale(${scale * exitScale})`,
+          display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
+          width: '100%',
         }}
       >
         <div
           style={{
-            color: '#fff',
-            fontSize: 42,
-            fontWeight: 700,
-            textAlign: 'center',
-            lineHeight: 1.25,
+            width: isFirst ? 72 : 56,
+            height: isFirst ? 72 : 56,
+            borderRadius: 999,
+            backgroundColor: accent,
+            marginBottom: 28,
+            transform: `scale(${dotScale})`,
+            boxShadow: `0 0 0 8px ${accent}33`,
+          }}
+        />
+        <div
+          style={{
+            width: '80%',
+            maxWidth: 640,
+            border: `6px solid ${accent}`,
+            borderRadius: 28,
+            padding: isFirst ? '56px 40px' : '48px 36px',
+            boxSizing: 'border-box',
+            alignItems: 'center',
+            backgroundColor: 'rgba(0,0,0,0.22)',
           }}
         >
-          {scene.headline}
-        </div>
-        {scene.body ? (
           <div
             style={{
-              marginTop: 20,
-              color: 'rgba(255,255,255,0.85)',
-              fontSize: 24,
+              color: '#fff',
+              fontSize: isFirst ? 48 : 42,
+              fontWeight: 700,
               textAlign: 'center',
+              lineHeight: 1.25,
+              letterSpacing: 1.2,
             }}
           >
-            {scene.body}
+            {scene.headline}
           </div>
-        ) : null}
+          {scene.body ? (
+            <div
+              style={{
+                marginTop: 20,
+                color: 'rgba(255,255,255,0.85)',
+                fontSize: 24,
+                textAlign: 'center',
+              }}
+            >
+              {scene.body}
+            </div>
+          ) : null}
+        </div>
       </div>
     </AbsoluteFill>
   );
@@ -316,25 +421,29 @@ function SequenceScenes({
   captionPosition,
 }: {
   scenes: Scene[];
-  SceneComp: React.FC<{
-    scene: Scene;
-    captionPosition?: StoryboardProps['captionPosition'];
-  }>;
+  SceneComp: React.FC<SceneCompProps>;
   logoUrl?: string;
   logoPosition?: StoryboardProps['logoPosition'];
   captionPosition?: StoryboardProps['captionPosition'];
 }) {
   const {fps} = useVideoConfig();
   let from = 0;
+  const count = scenes.length;
   return (
     <AbsoluteFill>
-      {scenes.map((scene) => {
+      {scenes.map((scene, i) => {
         const durationInFrames = Math.max(1, Math.round(scene.durationSec * fps));
         const start = from;
         from += durationInFrames;
         return (
           <Sequence key={scene.id} from={start} durationInFrames={durationInFrames}>
-            <SceneComp scene={scene} captionPosition={captionPosition} />
+            <SceneComp
+              scene={scene}
+              captionPosition={captionPosition}
+              sceneCount={count}
+              isFirst={i === 0}
+              isLast={i === count - 1}
+            />
           </Sequence>
         );
       })}

@@ -207,10 +207,19 @@ def _plan_with_llm(
     system = (
         "你是短视频分镜导演。只输出 JSON，不要 Markdown。"
         "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes, logoUrl。"
-        "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, bgColor, accentColor, imageUrl, videoUrl。"
+        "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, "
+        "bgColor, accentColor, imageUrl, videoUrl, sourceIndex。"
         "imageUrl/videoUrl 默认可留空；有短视频素材时填 videoUrl，优先于 imageUrl。"
         "竖屏 9:16，镜头 3～6 个，总时长约 12～24 秒。"
-        "颜色用 #RRGGBB。知识库约束必须遵守，不可编造冲突卖点。"
+        "颜色用 #RRGGBB。"
+        "若提供知识库约束（带 [n] 编号）："
+        "1) 卖点/合规句必须改写自这些条目，禁止编造未出现的承诺；"
+        "2) 每个镜头必须填 sourceIndex=所用条目编号；"
+        "3) headline/body 要能对应到该编号内容。"
+        "按模板差异化："
+        "talking-captions→headline 口语短句、body 稍长便于口播、durationSec 偏 3.5～4.5；"
+        "kinetic-text→headline 极短有力（≤14字）、body 可空或一句、durationSec 偏 2～3；"
+        "brand-intro→第1镜偏品牌开场（稍长）、末镜收束口号，中间镜讲卖点。"
     )
     user_parts = [
         f"用户一句话：{prompt}",
@@ -219,7 +228,10 @@ def _plan_with_llm(
     if brand_notes.strip():
         user_parts.append(f"品牌备注：{brand_notes.strip()}")
     if knowledge_hint.strip():
-        user_parts.append(f"知识库约束（必须遵守）：{knowledge_hint.strip()[:1200]}")
+        user_parts.append(
+            "知识库约束（必须遵守，按编号引用）：\n"
+            + knowledge_hint.strip()[:1600]
+        )
 
     content = llm.chat(
         [
@@ -254,28 +266,44 @@ def _plan_with_rules(
     """无 LLM 时的确定性分镜（演示/评测可用）。"""
     bg, accent = _PALETTES.get(template_id, _PALETTES["talking-captions"])
     title = _short_title(prompt)
-    beats = _split_beats(prompt)
-    if knowledge_hint.strip():
-        beats.append(f"规范：{knowledge_hint.strip()[:40]}")
+    kb_beats = _parse_kb_beats(knowledge_hint)
+    if kb_beats:
+        # 有知识库时优先用编号条目做镜，强制引用
+        beats = [b["text"] for b in kb_beats[:5]]
+        source_indices = [b["index"] for b in kb_beats[:5]]
+    else:
+        beats = _split_beats(prompt)
+        source_indices = [None] * len(beats)
 
     scenes: list[Scene] = []
     for i, beat in enumerate(beats[:5]):
+        src_idx = source_indices[i] if i < len(source_indices) else None
+        if template_id == "kinetic-text":
+            duration = 2.4 if i > 0 else 2.8
+            headline = beat[:14]
+            body = ""
+            hint = "快切大标题弹入"
+        elif template_id == "brand-intro":
+            duration = 4.2 if i == 0 else (3.8 if i == min(4, len(beats) - 1) else 3.2)
+            headline = beat[:36]
+            body = (brand_notes or "品牌印象 · AI 成片")[:60]
+            hint = "品牌框开场" if i == 0 else ("品牌框收束" if i == min(4, len(beats) - 1) else "品牌框卖点")
+        else:
+            duration = 4.0 if i == 0 else 3.5
+            headline = beat[:40]
+            body = (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]
+            hint = "底部口播字幕条滑入"
         scenes.append(
             Scene(
                 id=new_id("sc"),
                 index=i,
-                durationSec=3.5 if i == 0 else 3.0,
-                headline=beat[:40],
-                body=(brand_notes or "AI 短视频 · Remotion/模板渲染")[:80],
-                visualHint=(
-                    "快切大标题"
-                    if template_id == "kinetic-text"
-                    else "品牌框居中"
-                    if template_id == "brand-intro"
-                    else "底部口播字幕条"
-                ),
+                durationSec=duration,
+                headline=headline,
+                body=body,
+                visualHint=hint,
                 bgColor=bg,
                 accentColor=accent,
+                sourceIndex=src_idx,
             )
         )
     if len(scenes) < 3:
@@ -309,6 +337,25 @@ def _plan_with_rules(
 def _short_title(prompt: str) -> str:
     t = re.sub(r"\s+", " ", prompt).strip()
     return t[:24] + ("…" if len(t) > 24 else "")
+
+
+def _parse_kb_beats(knowledge_hint: str) -> list[dict[str, Any]]:
+    """从「[n] 《标题》：摘要」格式解析规则分镜用的卖点。"""
+    text = (knowledge_hint or "").strip()
+    if not text:
+        return []
+    beats: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        m = re.match(r"^\s*\[(\d+)\]\s*(?:《([^》]*)》[：:]?)?\s*(.+)$", line)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        title = (m.group(2) or "").strip()
+        snip = (m.group(3) or "").strip()
+        # 镜头标题优先用摘要前半，带上来源感
+        head = snip[:36] if snip else (title or f"要点{idx}")
+        beats.append({"index": idx, "text": head, "title": title})
+    return beats
 
 
 def _split_beats(prompt: str) -> list[str]:
