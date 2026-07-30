@@ -185,14 +185,14 @@ systemctl restart docs-agent
 
 ```text
 开发机 rn-biz-0.86
-  ① 配置 upload.local.json（baseUrl = http://PUBLIC_IP/cdn）
+  ① 配置 upload.local.json（baseUrl + sync.enabled=true）
   ② yarn pack:publish:common  --platform android --channel agent-docx
   ③ yarn pack:publish docs-agent --platform android --channel agent-docx
        ├─ 产出 project/dist/bundles/...
        ├─ 复制到 project/dist/cdn-local/rn/0.86.0/...
-       └─ 更新 channels/agent-docx/bundles.local.json 的 url
-  ④ rsync cdn-local/ → 服务器 /var/www/rn-cdn/
-  ⑤ 宿主使用该 bundles.local.json（channel=agent-docx）拉包
+       ├─ 更新 channels/agent-docx/bundles.local.json 的 url
+       └─ 自动 rsync → 服务器 /var/www/rn-cdn/（sync.enabled=true）
+  ④ 宿主使用该 channel 拉包（无需再手工 rsync）
 ```
 
 ### 3.2 上传配置
@@ -202,7 +202,7 @@ cd rn-biz-0.86
 cp project/config/upload.demo.example.json project/config/upload.local.json
 ```
 
-编辑 `upload.local.json`：
+编辑 `upload.local.json`（务必打开 `sync`，否则 App 仍读旧包）：
 
 ```json
 {
@@ -211,7 +211,13 @@ cp project/config/upload.demo.example.json project/config/upload.local.json
   "targetDir": "project/dist/cdn-local",
   "pathTemplate": "rn/{rnVersion}/{channel}/{key}/{platform}/{fileName}",
   "keepHistory": 5,
-  "defaultChannel": "agent-docx"
+  "defaultChannel": "agent-docx",
+  "sync": {
+    "enabled": true,
+    "host": "root@47.93.207.70",
+    "remoteDir": "/var/www/rn-cdn/",
+    "sshIdentityFile": "~/Downloads/first-pass.pem"
+  }
 }
 ```
 
@@ -229,6 +235,7 @@ yarn pack:list
 
 yarn pack:publish:common --platform android --channel agent-docx
 yarn pack:publish docs-agent --platform android --channel agent-docx
+# 日志应出现：[rn-pack] ✓ 远端 CDN 已同步
 ```
 
 当前演示产物示例（hash 随构建变化）：
@@ -241,6 +248,14 @@ yarn pack:publish docs-agent --platform android --channel agent-docx
 配置落点：`project/config/channels/agent-docx/bundles.local.json`（`url` 已是上述 HTTP 地址）。
 
 ### 3.4 同步到服务器
+
+`sync.enabled=true` 时，`pack:publish` / `pack:upload` 结束会自动 rsync。仅需补同步时：
+
+```bash
+yarn pack:sync --channel agent-docx
+```
+
+或手工：
 
 ```bash
 PEM=~/Downloads/first-pass.pem
@@ -317,9 +332,8 @@ ssh ... 'cd /opt/docs-agent-server && .venv/bin/pip install -r requirements.txt 
 ```bash
 yarn pack:publish docs-agent --platform android --channel agent-docx
 # 若改了 common 依赖再 publish:common
-rsync project/dist/cdn-local/ → /var/www/rn-cdn/
+# sync.enabled=true 时会自动 rsync；日志应有「远端 CDN 已同步」
 # 手机杀进程重开；必要时清分包缓存
-# 确认 bundles.local.json 新 hash 已交给宿主
 ```
 
 ### 改 API 契约时
