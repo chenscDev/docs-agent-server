@@ -28,7 +28,7 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
             storyboard = json.loads(job.storyboard_json)
         except json.JSONDecodeError:
             storyboard = None
-    return {
+    data: dict[str, Any] = {
         "id": job.id,
         "status": job.status,
         "progress": job.progress,
@@ -55,6 +55,23 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
         "createdAt": job.created_at.isoformat() if job.created_at else None,
         "updatedAt": job.updated_at.isoformat() if job.updated_at else None,
     }
+    # 排队位次（仅进行中任务有意义）
+    if job.status in {"pending", "scripting", "rendering"}:
+        try:
+            from app.video.render_queue import get_queue_info
+
+            q = get_queue_info(job.id)
+            data["queuePosition"] = q.get("position") or 0
+            data["queueAhead"] = q.get("ahead") or 0
+            data["queueEtaSec"] = q.get("etaSec") or 0
+            data["queueLabel"] = q.get("label") or ""
+        except Exception:  # noqa: BLE001
+            data["queuePosition"] = 0
+            data["queueAhead"] = 0
+            data["queueEtaSec"] = 0
+            data["queueLabel"] = ""
+    return data
+
 
 
 def create_job(

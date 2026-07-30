@@ -14,11 +14,32 @@ TTS_VOICES: list[dict[str, Any]] = [
         "description": "默认口播，清晰自然",
     },
     {
+        "id": "longxiaoxia_v2",
+        "name": "晓夏（女声·柔）",
+        "model": "cosyvoice-v2",
+        "voice": "longxiaoxia_v2",
+        "description": "偏柔和亲切",
+    },
+    {
+        "id": "longxiaocheng_v2",
+        "name": "晓诚（男声·亮）",
+        "model": "cosyvoice-v2",
+        "voice": "longxiaocheng_v2",
+        "description": "偏明亮讲解",
+    },
+    {
         "id": "longanyang",
         "name": "安阳（男声·稳）",
         "model": "cosyvoice-v3-flash",
         "voice": "longanyang",
         "description": "偏稳重讲解",
+    },
+    {
+        "id": "longjielidou_v2",
+        "name": "杰力豆（童趣）",
+        "model": "cosyvoice-v2",
+        "voice": "longjielidou_v2",
+        "description": "活泼轻快，适合趣味口播",
     },
     {
         "id": "longxiaochun",

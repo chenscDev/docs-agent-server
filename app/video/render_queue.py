@@ -19,7 +19,12 @@ _RECOVERABLE = frozenset({"pending", "scripting", "rendering"})
 
 _lock = threading.Lock()
 _queued_or_running: set[str] = set()
+# 排队顺序（含当前正在跑的队首）；用于位次 / 预计等待
+_queue_order: list[str] = []
 _executor: ThreadPoolExecutor | None = None
+
+# 单任务粗估秒数（演示机串行渲染）
+_ETA_SEC_PER_JOB = 50
 
 
 def enqueue_video_job(job_id: str) -> bool:
@@ -30,9 +35,75 @@ def enqueue_video_job(job_id: str) -> bool:
         if job_id in _queued_or_running:
             return False
         _queued_or_running.add(job_id)
+        _queue_order.append(job_id)
         if _executor is not None:
             _submit_locked(job_id)
+    _refresh_queue_stage_messages()
     return True
+
+
+def get_queue_info(job_id: str) -> dict[str, int | str]:
+    """返回排队位次（1 起算）、前方人数、预计等待秒。"""
+    jid = (job_id or "").strip()
+    with _lock:
+        order = list(_queue_order)
+    total = len(order)
+    if not jid or jid not in order:
+        return {
+            "position": 0,
+            "ahead": 0,
+            "total": total,
+            "etaSec": 0,
+            "label": "",
+        }
+    pos = order.index(jid) + 1
+    ahead = pos - 1
+    eta = ahead * _ETA_SEC_PER_JOB
+    if ahead <= 0:
+        label = "正在渲染…"
+    else:
+        mins = max(1, (eta + 29) // 60)
+        label = f"排队中：第 {pos}/{total} 位，前方 {ahead} 个，约 {mins} 分钟"
+    return {
+        "position": pos,
+        "ahead": ahead,
+        "total": total,
+        "etaSec": eta,
+        "label": label,
+    }
+
+
+def _refresh_queue_stage_messages() -> None:
+    """把排队位次写回尚未开渲的 pending 任务 stage_message。"""
+    try:
+        db_session.get_engine()
+        assert db_session.SessionLocal is not None
+        with _lock:
+            order = list(_queue_order)
+        if not order:
+            return
+        with db_session.SessionLocal() as db:
+            for i, jid in enumerate(order):
+                job = db.get(VideoJob, jid)
+                if job is None:
+                    continue
+                if job.status not in {"pending", "scripting"}:
+                    continue
+                ahead = i
+                total = len(order)
+                if ahead <= 0 and job.status == "pending":
+                    # 队首可能马上开渲，保留已有文案或给轻提示
+                    if not (job.stage_message or "").strip():
+                        job.stage_message = "即将开始渲染…"
+                elif ahead > 0:
+                    eta = ahead * _ETA_SEC_PER_JOB
+                    mins = max(1, (eta + 29) // 60)
+                    job.stage_message = (
+                        f"排队中：第 {i + 1}/{total} 位，前方 {ahead} 个，约 {mins} 分钟"
+                    )
+            db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("refresh queue stage messages failed")
 
 
 def start_video_queue(*, recover: bool = True, force: bool = False) -> int:
@@ -104,6 +175,7 @@ def stop_video_queue(*, wait: bool = False, timeout_sec: float = 120.0) -> None:
         ex.shutdown(wait=wait, cancel_futures=False)
     with _lock:
         _queued_or_running.clear()
+        _queue_order.clear()
     logger.info("video queue stopped")
 
 
@@ -166,5 +238,10 @@ def _submit_locked(job_id: str) -> None:
         finally:
             with _lock:
                 _queued_or_running.discard(job_id)
+                try:
+                    _queue_order.remove(job_id)
+                except ValueError:
+                    pass
+            _refresh_queue_stage_messages()
 
     _executor.submit(_run)

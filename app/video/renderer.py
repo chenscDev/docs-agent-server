@@ -54,7 +54,7 @@ def scene_content_hash(
         "ttsVoice": (tts_voice or "").strip(),
         "captionPosition": (caption_position or "bottom").strip(),
         "id": scene.id,
-        "index": scene.index,
+        # 不含 index：仅调整镜头顺序时可复用成片片段
         "durationSec": scene.durationSec,
         "headline": scene.headline,
         "body": scene.body or "",
@@ -1251,14 +1251,24 @@ def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
         storyboard.bgmVolume if storyboard.bgmVolume is not None else track_vol
     )
     vol = max(0.0, min(1.0, vol))
-    bgm_file = (settings.video_bgm_file or "").strip()
+    # 优先：曲目自带文件 → 全局 video_bgm_file → lavfi 兜底
+    from app.video.bgm_catalog import resolve_track_file
+
+    track_path = resolve_track_file(track)
+    global_file = (settings.video_bgm_file or "").strip()
+    bgm_file = ""
+    if track_path is not None:
+        bgm_file = str(track_path)
+    elif global_file and Path(global_file).is_file():
+        bgm_file = global_file
     lavfi = str(track.get("lavfi") or "").strip()
     af_extra = str(track.get("afExtra") or "lowpass=f=1200").strip()
 
     with tempfile.TemporaryDirectory(prefix="ai-video-bgm-") as tmp:
         tmp_path = Path(tmp)
         bgm_wav = tmp_path / "bgm.wav"
-        if bgm_file and Path(bgm_file).is_file():
+        if bgm_file:
+            fade_out_st = max(0.5, duration - 1.0)
             cmd = [
                 ffmpeg,
                 "-y",
@@ -1268,6 +1278,9 @@ def _try_mix_bgm(storyboard: Storyboard, video_path: Path) -> Path | None:
                 bgm_file,
                 "-t",
                 f"{duration:.2f}",
+                "-af",
+                f"volume={vol:.3f},"
+                f"afade=t=in:st=0:d=0.8,afade=t=out:st={fade_out_st:.2f}:d=1.0",
                 "-ac",
                 "1",
                 "-ar",
