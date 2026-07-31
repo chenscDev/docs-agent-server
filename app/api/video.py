@@ -24,6 +24,10 @@ from app.video.bgm_catalog import list_bgm_tracks, save_custom_bgm
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
+from app.video.industry_presets import (
+    list_industries,
+    list_industry_presets,
+)
 from app.video.schema import (
     GENERATION_TYPE_CATALOG,
     TEMPLATE_CATALOG,
@@ -77,6 +81,8 @@ class CreateJobBody(BaseModel):
     auto_understand_materials: bool = Field(
         default=True, alias="autoUnderstandMaterials"
     )
+    # 行业玩法预设（电商/本地生活/招聘等）
+    industry_preset_id: str | None = Field(default=None, alias="industryPresetId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -182,6 +188,21 @@ def get_templates() -> dict[str, Any]:
 def get_generation_types() -> dict[str, Any]:
     """生成类型目录：口播 / 快闪 / 品牌 / 纯画面等。"""
     return {"items": GENERATION_TYPE_CATALOG}
+
+
+@router.get("/industries")
+def get_industries() -> dict[str, Any]:
+    """行业维度：电商 / 本地生活 / 招聘 / 生活趣味。"""
+    return {"items": list_industries()}
+
+
+@router.get("/industry-presets")
+def get_industry_presets(industry: str | None = None) -> dict[str, Any]:
+    """行业预制玩法（口播/快闪灵感 + 默认生成类型）。"""
+    return {
+        "industries": list_industries(),
+        "items": list_industry_presets(industry),
+    }
 
 
 @router.get("/bgm-tracks")
@@ -366,6 +387,8 @@ def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, An
         materials=[m.model_dump() for m in (body.materials or [])],
         auto_generate_scene_images=bool(body.auto_generate_scene_images),
         auto_understand_materials=bool(body.auto_understand_materials),
+        generation_type=body.generation_type,
+        industry_preset_id=body.industry_preset_id,
     )
     if body.auto_start:
         enqueue_video_job(job.id)

@@ -126,5 +126,13 @@ def _ensure_video_job_columns(engine: Engine) -> None:
                 "ALTER TABLE video_jobs ADD COLUMN auto_generate_scene_images "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+        if "generation_type" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN generation_type VARCHAR(64)"
+            )
+        if "industry_preset_id" not in cols:
+            alters.append(
+                "ALTER TABLE video_jobs ADD COLUMN industry_preset_id VARCHAR(64)"
+            )
         for sql in alters:
             conn.execute(text(sql))

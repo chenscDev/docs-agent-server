@@ -37,6 +37,8 @@ def job_to_dict(job: VideoJob) -> dict[str, Any]:
         "stageMessage": job.stage_message,
         "prompt": job.prompt,
         "templateId": job.template_id,
+        "generationType": getattr(job, "generation_type", None),
+        "industryPresetId": getattr(job, "industry_preset_id", None),
         "title": job.title,
         "version": job.version,
         "parentJobId": job.parent_job_id,
@@ -105,12 +107,19 @@ def create_job(
     materials: list[dict[str, Any]] | None = None,
     auto_generate_scene_images: bool = False,
     auto_understand_materials: bool = True,
+    generation_type: str | None = None,
+    industry_preset_id: str | None = None,
 ) -> VideoJob:
     settings = get_settings()
     owner = (owner_id or settings.video_default_owner_id or "").strip() or None
     mats = normalize_materials(materials)
     # 识图放在 plan SSE / pipeline，避免创建接口被 VL 长时间阻塞
     _ = auto_understand_materials
+    # 优先显式 generation_type；否则从分镜回填
+    gtype = (generation_type or "").strip() or None
+    if not gtype and storyboard is not None:
+        gtype = getattr(storyboard, "generationType", None) or None
+    ipid = (industry_preset_id or "").strip() or None
     job = VideoJob(
         id=new_id("vjob"),
         status="pending",
@@ -118,6 +127,8 @@ def create_job(
         stage_message="已创建，等待规划分镜",
         prompt=prompt.strip(),
         template_id=template_id,
+        generation_type=gtype,
+        industry_preset_id=ipid,
         knowledge_base_id=knowledge_base_id,
         parent_job_id=parent_job_id,
         version=1,
@@ -192,6 +203,8 @@ def duplicate_job(db: Session, source: VideoJob) -> VideoJob:
         parent_job_id=source.id,
         storyboard=board,
         owner_id=source.owner_id,
+        generation_type=getattr(source, "generation_type", None),
+        industry_preset_id=getattr(source, "industry_preset_id", None),
     )
     child.status = "scripting" if board else "pending"
     child.stage_message = "已复制，可编辑后重新生成"
@@ -552,18 +565,29 @@ def run_job_pipeline(job_id: str) -> None:
                 job.stage_message = "正在规划分镜…"
                 job.progress = 0.25
                 db.commit()
+                from app.video.industry_presets import industry_planner_hint
+
+                sb_gen = None
+                if job.storyboard_json:
+                    try:
+                        sb_gen = (json.loads(job.storyboard_json) or {}).get(
+                            "generationType"
+                        )
+                    except json.JSONDecodeError:
+                        sb_gen = None
+                gtype = (
+                    getattr(job, "generation_type", None) or sb_gen or None
+                )
+                industry_hint = industry_planner_hint(
+                    getattr(job, "industry_preset_id", None)
+                )
                 board = plan_storyboard(
                     job.prompt,
                     template_id=job.template_id,  # type: ignore[arg-type]
-                    generation_type=(
-                        (json.loads(job.storyboard_json or "{}") or {}).get(
-                            "generationType"
-                        )
-                        if job.storyboard_json
-                        else None
-                    ),
+                    generation_type=gtype,
                     knowledge_hint=hint,
                     materials=mats,
+                    industry_hint=industry_hint,
                 )
                 if refs:
                     board = apply_knowledge_sources(board, refs)

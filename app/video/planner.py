@@ -44,6 +44,7 @@ def plan_storyboard(
     knowledge_hint: str = "",
     materials: list[dict[str, Any]] | None = None,
     prefer_rules: bool = False,
+    industry_hint: str = "",
 ) -> Storyboard:
     """根据一句话生成分镜；LLM 不可用或校验失败时走规则模板。"""
     prompt = (prompt or "").strip()
@@ -54,6 +55,9 @@ def plan_storyboard(
     # 生成类型锁定默认模板（客户端传了 template 也以类型为准，避免错配）
     template_id = gmeta["defaultTemplateId"]  # type: ignore[assignment]
     type_hint = str(gmeta.get("plannerHint") or "")
+    extra = (industry_hint or "").strip()
+    if extra:
+        type_hint = f"{type_hint} {extra}".strip()
 
     mats = normalize_materials(materials)
     board: Storyboard | None = None

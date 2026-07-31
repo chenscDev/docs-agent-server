@@ -171,6 +171,10 @@ class VideoJob(Base):
     stage_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     template_id: Mapped[str] = mapped_column(String(64), nullable=False, default="talking-captions")
+    # 生成类型：narration / kinetic / brand / visual-cut（规划时优先于分镜内字段）
+    generation_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 行业玩法预设 id（电商/本地生活/招聘等）
+    industry_preset_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     parent_job_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
