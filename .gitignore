@@ -32,3 +32,6 @@ video-renderer/.remotion/
 !.vscode/settings.json
 .DS_Store
 
+
+# 用户上传的自定义配乐（运行时生成）
+app/video/assets/bgm/custom/

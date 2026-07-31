@@ -124,7 +124,25 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
 ]
 
 # 生成类型（产品模式）：决定口播开关、默认模板与设置项显隐
+# 首位默认：纯画面剪辑
 GENERATION_TYPE_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "visual-cut",
+        "name": "纯画面剪辑",
+        "description": "无口播，素材快切 + 配乐，适合氛围片",
+        "emoji": "🎬",
+        "coverColor": "#334155",
+        "defaultTemplateId": "kinetic-text",
+        "defaultBgmTrackId": "bright-pulse",
+        "ttsEnabled": False,
+        "showTts": False,
+        "showCaptionPosition": False,
+        "showLogo": True,
+        "plannerHint": (
+            "纯画面剪辑：不要旁白口播；headline 极短标题（≤10字），"
+            "body 必须为空；靠素材节奏与配乐表达，不要写长解说。"
+        ),
+    },
     {
         "id": "narration",
         "name": "口播解说",
@@ -176,29 +194,12 @@ GENERATION_TYPE_CATALOG: list[dict[str, Any]] = [
             "中间镜讲卖点，可结合 Logo/品牌备注。"
         ),
     },
-    {
-        "id": "visual-cut",
-        "name": "纯画面剪辑",
-        "description": "无口播，素材快切 + 配乐，适合氛围片",
-        "emoji": "🎬",
-        "coverColor": "#334155",
-        "defaultTemplateId": "kinetic-text",
-        "defaultBgmTrackId": "bright-pulse",
-        "ttsEnabled": False,
-        "showTts": False,
-        "showCaptionPosition": False,
-        "showLogo": True,
-        "plannerHint": (
-            "纯画面剪辑：不要旁白口播；headline 极短标题（≤10字），"
-            "body 必须为空；靠素材节奏与配乐表达，不要写长解说。"
-        ),
-    },
 ]
 
 
 def resolve_generation_type(type_id: str | None) -> dict[str, Any]:
-    """解析生成类型；未知则回落口播解说。"""
-    tid = (type_id or "").strip() or "narration"
+    """解析生成类型；未知则回落纯画面剪辑（目录首位）。"""
+    tid = (type_id or "").strip() or "visual-cut"
     for item in GENERATION_TYPE_CATALOG:
         if item["id"] == tid:
             return item
@@ -211,7 +212,7 @@ def apply_generation_type_defaults(
 ) -> dict[str, Any]:
     """按生成类型补齐 templateId / ttsEnabled / 默认 BGM。"""
     out = dict(data or {})
-    gtid = generation_type or out.get("generationType") or "narration"
+    gtid = generation_type or out.get("generationType") or "visual-cut"
     meta = resolve_generation_type(str(gtid))
     out["generationType"] = meta["id"]
     out["templateId"] = meta["defaultTemplateId"]

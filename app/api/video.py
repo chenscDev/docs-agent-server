@@ -20,7 +20,7 @@ from app.core.ids import new_id
 from app.db.models import VideoJob
 from app.db.session import get_db
 from app.video.assets import save_uploaded_asset
-from app.video.bgm_catalog import list_bgm_tracks
+from app.video.bgm_catalog import list_bgm_tracks, save_custom_bgm
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
@@ -178,6 +178,20 @@ def get_generation_types() -> dict[str, Any]:
 def get_bgm_tracks(template_id: str | None = None) -> dict[str, Any]:
     """BGM 曲库；可按模板过滤推荐。"""
     return {"items": list_bgm_tracks(template_id=template_id)}
+
+
+@router.post("/bgm-tracks/upload")
+async def upload_bgm_track(file: UploadFile = File(...)) -> dict[str, Any]:
+    """上传自定义配乐（mp3/wav/m4a 等），返回可选用曲目。"""
+    data = await file.read()
+    try:
+        return save_custom_bgm(
+            data=data,
+            filename=file.filename,
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        raise_api_error(400, "BGM_INVALID", str(exc))
 
 
 @router.get("/tts-voices")
