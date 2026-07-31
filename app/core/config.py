@@ -69,7 +69,8 @@ class Settings(BaseSettings):
     # auto：本机 Remotion →（可选）Lambda 渲染跳板 → FFmpeg
     video_renderer: str = "auto"
     video_output_dir: str = "./data/video_out"
-    video_public_base_url: str = ""  # 空则用相对 /cdn/video/
+    # 空则用相对 /cdn/video/；有值时也可供 VL 拉取公网素材
+    video_public_base_url: str = ""
     remotion_project_dir: str = "./video-renderer"
     video_render_timeout_sec: int = 300
     # 本机 Remotion 并发（2G 演示机建议 1，降低 OOM）
@@ -103,6 +104,11 @@ class Settings(BaseSettings):
     video_t2i_enabled: bool = True
     video_t2i_model: str = "wanx-v1"
     video_t2i_size: str = "720*1280"
+    # 上传素材多模态理解（识图/抽帧写 caption，供分镜贴合画面）
+    video_vision_enabled: bool = True
+    video_vision_model: str = "qwen-vl-plus"
+    video_vision_video_frames: int = 3
+    video_vision_timeout_sec: float = 60.0
 
 
 @lru_cache

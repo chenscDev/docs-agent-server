@@ -104,10 +104,13 @@ def create_job(
     owner_id: str | None = None,
     materials: list[dict[str, Any]] | None = None,
     auto_generate_scene_images: bool = False,
+    auto_understand_materials: bool = True,
 ) -> VideoJob:
     settings = get_settings()
     owner = (owner_id or settings.video_default_owner_id or "").strip() or None
     mats = normalize_materials(materials)
+    # 识图放在 plan SSE / pipeline，避免创建接口被 VL 长时间阻塞
+    _ = auto_understand_materials
     job = VideoJob(
         id=new_id("vjob"),
         status="pending",
@@ -499,6 +502,45 @@ def run_job_pipeline(job_id: str) -> None:
                 refs = resolve_knowledge_refs(db, job.knowledge_base_id)
                 hint = format_knowledge_hint(refs)
                 mats = _job_materials(job)
+                # 兜底：若 materials 尚无 caption，渲染前再识图一次
+                if (
+                    mats
+                    and getattr(settings, "video_vision_enabled", True)
+                    and any(not (m.get("caption") or "").strip() for m in mats)
+                ):
+                    try:
+                        from app.video.vision_caption import understand_materials
+
+                        job.stage_message = "正在理解素材画面…"
+                        job.progress = 0.15
+                        db.commit()
+
+                        def report_vision(message: str, progress: float | None) -> None:
+                            if cancelled():
+                                return
+                            job.stage_message = (message or "")[:500]
+                            if progress is not None:
+                                job.progress = float(progress)
+                            try:
+                                db.commit()
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("写入识图进度失败: %s", exc)
+                                db.rollback()
+
+                        mats = understand_materials(mats, on_progress=report_vision)
+                        job.materials_json = json.dumps(mats, ensure_ascii=False)
+                        db.commit()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("pipeline understand_materials failed: %s", exc)
+
+                if cancelled():
+                    job.status = "cancelled"
+                    db.commit()
+                    return
+
+                job.stage_message = "正在规划分镜…"
+                job.progress = 0.25
+                db.commit()
                 board = plan_storyboard(
                     job.prompt,
                     template_id=job.template_id,  # type: ignore[arg-type]

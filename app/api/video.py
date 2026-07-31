@@ -45,10 +45,11 @@ router = APIRouter(prefix="/v1/video", tags=["video"])
 
 
 class MaterialItem(BaseModel):
-    """创作素材：图片或短视频 URL。"""
+    """创作素材：图片或短视频 URL，可选内容描述（识图结果）。"""
 
     url: str = Field(..., min_length=1, max_length=500)
     kind: str = Field(default="image", pattern="^(image|video)$")
+    caption: str | None = Field(default=None, max_length=200)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -65,6 +66,10 @@ class CreateJobBody(BaseModel):
     auto_generate_scene_images: bool = Field(
         default=False, alias="autoGenerateSceneImages"
     )
+    # 有素材时是否先多模态理解内容再规划（默认开）
+    auto_understand_materials: bool = Field(
+        default=True, alias="autoUnderstandMaterials"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -77,6 +82,9 @@ class PlanBody(BaseModel):
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
     knowledge_base_ids: list[str] | None = Field(default=None, alias="knowledgeBaseIds")
     materials: list[MaterialItem] | None = None
+    auto_understand_materials: bool = Field(
+        default=True, alias="autoUnderstandMaterials"
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -285,6 +293,7 @@ def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, An
         owner_id=body.owner_id,
         materials=[m.model_dump() for m in (body.materials or [])],
         auto_generate_scene_images=bool(body.auto_generate_scene_images),
+        auto_understand_materials=bool(body.auto_understand_materials),
     )
     if body.auto_start:
         enqueue_video_job(job.id)
@@ -539,6 +548,7 @@ def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingRespo
             brand_notes=body.brand_notes,
             knowledge_hint=hint,
             materials=[m.model_dump() for m in (body.materials or [])],
+            auto_understand_materials=bool(body.auto_understand_materials),
         )
 
     return StreamingResponse(gen(), media_type="text/event-stream")

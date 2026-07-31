@@ -15,7 +15,7 @@ def normalize_materials(raw: list[Any] | None) -> list[dict[str, str]]:
     """
     规范化客户端 materials。
 
-    每项：{ url, kind: image|video }
+    每项：{ url, kind: image|video, caption? }
     最多 9 条；非法项丢弃。
     """
     if not raw:
@@ -44,7 +44,11 @@ def normalize_materials(raw: list[Any] | None) -> list[dict[str, str]]:
         ):
             continue
         seen.add(url)
-        out.append({"url": url[:500], "kind": kind})
+        row: dict[str, str] = {"url": url[:500], "kind": kind}
+        caption = str(item.get("caption") or "").strip()
+        if caption:
+            row["caption"] = caption[:200]
+        out.append(row)
         if len(out) >= _MAX_MATERIALS:
             break
     return out

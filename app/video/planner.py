@@ -230,8 +230,9 @@ def _plan_with_llm(
         "1) 卖点/合规句必须改写自这些条目，禁止编造未出现的承诺；"
         "2) 每个镜头必须填 sourceIndex=所用条目编号；"
         "3) headline/body 要能对应到该编号内容。"
-        "若提供用户素材列表：按素材顺序讲故事，每镜文案贴合对应素材内容，"
-        "visualHint 简述该素材如何出镜。"
+        "若提供用户素材列表：按素材顺序讲故事；"
+        "若素材带「内容描述」：headline/body/visualHint 必须贴合该描述的可见内容，"
+        "禁止编造素材里没有的物体或情节；无内容描述时 visualHint 简述该素材如何出镜。"
         "按模板差异化："
         "talking-captions→headline 口语短句、body 稍长便于口播、durationSec 偏 3.5～4.5；"
         "kinetic-text→headline 极短有力（≤14字）、body 可空或一句、durationSec 偏 2～3；"
@@ -252,7 +253,15 @@ def _plan_with_llm(
     if mats:
         lines = []
         for i, m in enumerate(mats):
-            lines.append(f"[{i + 1}] kind={m['kind']} url={m['url'][:120]}")
+            cap = (m.get("caption") or "").strip()
+            if cap:
+                lines.append(
+                    f"[{i + 1}] kind={m['kind']} 内容描述：{cap}"
+                )
+            else:
+                lines.append(
+                    f"[{i + 1}] kind={m['kind']} url={m['url'][:120]}"
+                )
         user_parts.append(
             "用户上传素材（按顺序对应镜头，服务端会写入 imageUrl/videoUrl）：\n"
             + "\n".join(lines)
@@ -332,8 +341,20 @@ def _plan_with_rules(
             body = (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]
             hint = "底部口播字幕条滑入"
         if mats:
-            kind = mats[i % len(mats)]["kind"]
-            hint = "用户短视频素材" if kind == "video" else "用户图片素材"
+            mat = mats[i % len(mats)]
+            kind = mat["kind"]
+            cap = (mat.get("caption") or "").strip()
+            if cap:
+                hint = cap[:120]
+                # 有内容描述时，规则兜底也尽量把口播贴近画面
+                if not body or body == (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]:
+                    body = cap[:80]
+                if template_id == "kinetic-text":
+                    headline = (cap[:14] or headline)
+                elif len(headline) < 4:
+                    headline = cap[:36]
+            else:
+                hint = "用户短视频素材" if kind == "video" else "用户图片素材"
         scenes.append(
             Scene(
                 id=new_id("sc"),

@@ -110,16 +110,21 @@ def iter_creative_plan_sse(
     brand_notes: str = "",
     knowledge_hint: str = "",
     materials: list[dict[str, Any]] | None = None,
+    auto_understand_materials: bool = True,
 ) -> Iterator[str]:
     """
     流式推送分镜规划过程（不依赖会话表，供 home 创作页使用）。
 
     事件：stage / scene_delta / storyboard / done / error
     """
+    from app.core.config import get_settings
+    from app.video.materials import normalize_materials
+
     stream_id = new_id("vstream")
     job_placeholder = new_id("plan")
     seq = 0
     cancel_ev = register(stream_id, stream_id)
+    settings = get_settings()
 
     def emit(event_type: str, payload: dict[str, Any]) -> str:
         nonlocal seq
@@ -143,7 +148,65 @@ def iter_creative_plan_sse(
             yield emit("cancelled", {"message": "已取消"})
             return
 
-        mats = materials or []
+        mats = normalize_materials(materials)
+        # 有素材且开启识图：逐条理解并推送进度
+        if (
+            auto_understand_materials
+            and mats
+            and getattr(settings, "video_vision_enabled", True)
+        ):
+            need_idx = [
+                i for i, m in enumerate(mats) if not (m.get("caption") or "").strip()
+            ]
+            if need_idx:
+                from app.video.vision_caption import caption_image, caption_video
+
+                total = len(need_idx)
+                yield emit(
+                    "stage",
+                    {
+                        "stage": "scripting",
+                        "message": f"正在理解素材画面（0/{total}）…",
+                        "progress": 0.12,
+                    },
+                )
+                for n, idx in enumerate(need_idx):
+                    if cancel_ev.is_set():
+                        yield emit("cancelled", {"message": "已取消"})
+                        return
+                    yield emit(
+                        "stage",
+                        {
+                            "stage": "scripting",
+                            "message": f"正在理解素材 {n + 1}/{total}…",
+                            "progress": 0.12 + 0.1 * (n / max(1, total)),
+                        },
+                    )
+                    m = mats[idx]
+                    try:
+                        if m.get("kind") == "video":
+                            cap = caption_video(m["url"])
+                        else:
+                            cap = caption_image(m["url"])
+                        if cap:
+                            mats[idx] = {**m, "caption": cap[:200]}
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "plan vision material %s failed: %s", idx, exc
+                        )
+                yield emit(
+                    "stage",
+                    {
+                        "stage": "scripting",
+                        "message": "素材理解完成，开始规划分镜…",
+                        "progress": 0.22,
+                    },
+                )
+
+        if cancel_ev.is_set():
+            yield emit("cancelled", {"message": "已取消"})
+            return
+
         # 先推送规则骨架，再（可选）用最终分镜覆盖——保证弱网也有反馈
         draft = plan_storyboard(
             prompt,
@@ -197,6 +260,7 @@ def iter_creative_plan_sse(
             "storyboard",
             {
                 "storyboard": final.to_public_dict(),
+                "materials": mats,
                 "progress": 0.9,
             },
         )
@@ -204,6 +268,7 @@ def iter_creative_plan_sse(
             "done",
             {
                 "storyboard": final.to_public_dict(),
+                "materials": mats,
                 "progress": 1.0,
                 "streamId": stream_id,
             },
