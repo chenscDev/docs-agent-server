@@ -63,6 +63,9 @@ def scene_content_hash(
         "accentColor": scene.accentColor,
         "imageUrl": scene.imageUrl or "",
         "videoUrl": getattr(scene, "videoUrl", "") or "",
+        "videoTrimStartSec": round(
+            float(getattr(scene, "videoTrimStartSec", 0) or 0), 3
+        ),
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
@@ -916,9 +919,11 @@ def _render_scene_clip(
     color = scene.bgColor.lstrip("#")
     video_src = _resolve_media_file(getattr(scene, "videoUrl", "") or "")
 
-    # 有短视频底图：视频铺满 + 透明字幕叠层
+    # 有短视频底图：视频铺满 + 透明字幕叠层（按 trim 起点裁一段，避免永远播首帧）
     if video_src is not None:
         overlay = output.with_suffix(".overlay.png")
+        trim_start = max(0.0, float(getattr(scene, "videoTrimStartSec", 0) or 0))
+        trim_dur = max(0.5, float(scene.durationSec))
         if _make_scene_card_png(
             scene,
             width=width,
@@ -930,7 +935,8 @@ def _render_scene_clip(
         ):
             vf = (
                 f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},trim=duration={scene.durationSec},"
+                f"crop={width}:{height},"
+                f"trim=start={trim_start}:duration={trim_dur},"
                 f"setpts=PTS-STARTPTS,fps={fps}[bg];"
                 f"[1:v]format=rgba,fps={fps}[ov];"
                 f"[bg][ov]overlay=0:0:shortest=1[vout]"
@@ -938,6 +944,8 @@ def _render_scene_clip(
             cmd = [
                 ffmpeg,
                 "-y",
+                "-ss",
+                f"{trim_start:.3f}",
                 "-i",
                 str(video_src),
                 "-loop",
@@ -945,11 +953,18 @@ def _render_scene_clip(
                 "-i",
                 str(overlay),
                 "-filter_complex",
-                vf,
+                # 输入已 -ss，滤镜内再 trim 从 0 起裁时长即可
+                (
+                    f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,"
+                    f"crop={width}:{height},trim=duration={trim_dur},"
+                    f"setpts=PTS-STARTPTS,fps={fps}[bg];"
+                    f"[1:v]format=rgba,fps={fps}[ov];"
+                    f"[bg][ov]overlay=0:0:shortest=1[vout]"
+                ),
                 "-map",
                 "[vout]",
                 "-t",
-                f"{scene.durationSec}",
+                f"{trim_dur}",
                 "-c:v",
                 "libx264",
                 "-pix_fmt",
@@ -1068,15 +1083,15 @@ def _mux_scene_tts(
     target_dur = max(scene.durationSec, min(duration + 0.3, 15.0))
 
     out = tmp_dir / f"{scene.index:02d}_voiced.mp4"
-    # 先把视频时长对齐到 target_dur（循环或截断）
+    # 先把视频时长对齐到 target_dur：不够则定格末帧，禁止整段循环（否则像同一动作反复播）
     stretched = tmp_dir / f"{scene.index:02d}_len.mp4"
     stretch_cmd = [
         ffmpeg,
         "-y",
-        "-stream_loop",
-        "-1",
         "-i",
         str(video_path),
+        "-vf",
+        f"tpad=stop_mode=clone:stop_duration={max(target_dur, 15.0):.2f}",
         "-t",
         f"{target_dur:.2f}",
         "-c:v",

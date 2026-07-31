@@ -27,6 +27,8 @@ class Scene(BaseModel):
     imageUrl: str = Field("", max_length=500)
     # 分镜短视频素材；有值时优先于 imageUrl
     videoUrl: str = Field("", max_length=500)
+    # 从原视频第几秒开始播（连续分镜错开，避免每镜都从 0 秒重头播）
+    videoTrimStartSec: float = Field(0.0, ge=0.0, le=600.0)
     # 知识库引用：编号（与 hint 中 [n] 对应）
     sourceIndex: int | None = Field(None, ge=1, le=32)
     # 知识库 chunk id（便于端上跳转原文）

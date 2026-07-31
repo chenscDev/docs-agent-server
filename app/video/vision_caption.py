@@ -22,14 +22,78 @@ ProgressCallback = Callable[[str, float | None], None]
 
 _IMAGE_PROMPT = (
     "用中文简要描述这张图片的可见内容，供短视频口播写作参考。"
-    "包含：主体、场景、氛围、显著文字（若有）。"
+    "包含：主体、动作、场景、氛围/情绪（调皮、搞笑、温馨、忙乱等）、显著文字（若有）。"
     "只写画面里能看到的，不要编造；2～4 句，不超过 120 字。"
 )
 
 _VIDEO_FRAME_PROMPT = (
-    "这是短视频中的一帧。用中文一句话描述画面可见内容（主体+动作/场景），"
-    "不要编造，不超过 40 字。"
+    "这是短视频中的一帧。用中文一句话描述画面可见内容（主体+动作/情绪），"
+    "若有调皮、搞怪、反差请点明，不要编造，不超过 40 字。"
 )
+
+_SUGGEST_PROMPT_SYSTEM = (
+    "你是短视频创意文案助手。根据素材画面描述，写一条可直接用于成片的「创意描述」。"
+    "要求：中文口语、生活化，可俏皮/调侃/抓反差；突出画面最有趣的一点；"
+    "禁止写成正式广告或严肃育儿说教；40～120 字；只输出正文，不要标题或引号。"
+)
+
+
+def suggest_creative_prompt(
+    materials: list[dict[str, Any]] | None,
+    *,
+    understand_first: bool = True,
+) -> str:
+    """根据素材（可选先识图）生成推荐创意描述。"""
+    mats = normalize_materials(materials)
+    if not mats:
+        return ""
+    if understand_first:
+        try:
+            mats = understand_materials(mats)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("suggest understand failed: %s", exc)
+
+    settings = get_settings()
+    api_key = (settings.llm_api_key or "").strip()
+    if not api_key:
+        # 无 LLM：用 caption 拼一句兜底
+        caps = [str(m.get("caption") or "").strip() for m in mats]
+        caps = [c for c in caps if c]
+        if not caps:
+            return "用这几段素材做一条有趣的生活短视频，语气轻松口语化。"
+        return ("根据素材画面：" + "；".join(caps[:3]) + "。做成轻松好玩的口播短视频。")[
+            :200
+        ]
+
+    lines = []
+    for i, m in enumerate(mats):
+        cap = (m.get("caption") or "").strip() or "（暂无画面描述）"
+        lines.append(f"[{i + 1}] {m.get('kind')}：{cap}")
+    client = OpenAI(api_key=api_key, base_url=settings.llm_base_url)
+    model = (settings.llm_model or "qwen-plus").strip()
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _SUGGEST_PROMPT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": "素材内容：\n" + "\n".join(lines),
+                },
+            ],
+            timeout=float(getattr(settings, "video_vision_timeout_sec", 60) or 60),
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        text = text.strip("「」\"' \n")
+        return text[:500]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("suggest_creative_prompt failed: %s", exc)
+        caps = [str(m.get("caption") or "").strip() for m in mats]
+        caps = [c for c in caps if c]
+        if caps:
+            return ("用这些画面拍短视频：" + caps[0][:80] + "，语气轻松好玩。")[:200]
+        return ""
+
 
 
 def understand_materials(

@@ -20,6 +20,8 @@ export type Scene = {
   imageUrl?: string;
   /** 短视频底图，优先于 imageUrl */
   videoUrl?: string;
+  /** 从原视频第几秒开始播（连续分镜错开） */
+  videoTrimStartSec?: number;
 };
 
 export type StoryboardProps = {
@@ -45,12 +47,18 @@ function SceneBackground({scene}: {scene: Scene}) {
   const bg = scene.bgColor || '#0F172A';
   const videoSrc = (scene.videoUrl || '').trim();
   const imageSrc = (scene.imageUrl || '').trim();
+  const {fps} = useVideoConfig();
   if (videoSrc) {
+    const startFrom = Math.max(
+      0,
+      Math.round((scene.videoTrimStartSec || 0) * fps),
+    );
     return (
       <AbsoluteFill style={{backgroundColor: bg}}>
         <OffthreadVideo
           src={videoSrc}
           muted
+          startFrom={startFrom}
           style={{width: '100%', height: '100%', objectFit: 'cover'}}
         />
         <AbsoluteFill style={{backgroundColor: 'rgba(0,0,0,0.28)'}} />

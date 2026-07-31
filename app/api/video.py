@@ -139,6 +139,15 @@ class GenerateSceneImageBody(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SuggestPromptBody(BaseModel):
+    """根据上传素材推荐创意描述。"""
+
+    materials: list[MaterialItem] = Field(..., min_length=1)
+    understand_first: bool = Field(default=True, alias="understandFirst")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class CancelJobBody(BaseModel):
     job_id: str | None = Field(default=None, alias="jobId")
     stream_id: str | None = Field(default=None, alias="streamId")
@@ -221,6 +230,23 @@ async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
     except ValueError as exc:
         raise_api_error(400, "ASSET_INVALID", str(exc))
     return saved
+
+
+@router.post("/materials/suggest-prompt")
+def post_suggest_prompt(body: SuggestPromptBody) -> dict[str, Any]:
+    """根据上传素材（可先识图）推荐一条生活化创意描述。"""
+    from app.video.vision_caption import suggest_creative_prompt
+
+    try:
+        prompt = suggest_creative_prompt(
+            [m.model_dump() for m in body.materials],
+            understand_first=bool(body.understand_first),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise_api_error(500, "SUGGEST_PROMPT_FAILED", str(exc)[:200])
+    if not (prompt or "").strip():
+        raise_api_error(400, "SUGGEST_PROMPT_EMPTY", "无法根据素材生成创意描述")
+    return {"prompt": prompt.strip()}
 
 
 @router.post("/scenes/generate-image")

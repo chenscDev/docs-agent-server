@@ -13,6 +13,7 @@ from app.video.materials import (
     attach_materials_to_scenes,
     normalize_materials,
     target_scene_count,
+    target_total_duration_sec,
 )
 from app.video.schema import Scene, Storyboard, TemplateId, validate_storyboard
 
@@ -218,23 +219,29 @@ def _plan_with_llm(
 
     mats = normalize_materials(materials)
     scene_n = target_scene_count(mats, default=4)
+    total_sec = target_total_duration_sec(mats)
+    per_sec = round(total_sec / max(1, scene_n), 1)
     system = (
         "你是短视频分镜导演。只输出 JSON，不要 Markdown。"
         "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes, logoUrl。"
-        "scenes 每项：id, index, durationSec(2-5), headline, body, visualHint, "
+        "scenes 每项：id, index, durationSec, headline, body, visualHint, "
         "bgColor, accentColor, imageUrl, videoUrl, sourceIndex。"
         "imageUrl/videoUrl 默认可留空（服务端会按素材列表自动填充）。"
-        f"竖屏 9:16，镜头约 {scene_n} 个（3～9），总时长约 12～28 秒。"
+        f"竖屏 9:16，镜头约 {scene_n} 个，总时长约 {total_sec:.0f} 秒"
+        f"（每镜 durationSec 约 {per_sec}，范围 2～5）。"
         "颜色用 #RRGGBB。"
+        "文案语气：生活化口语，像朋友发朋友圈/短视频口播，可以俏皮、调侃、抓反差；"
+        "少用「培养」「陪伴成长」「温馨时光」「品质生活」等正式广告腔。"
+        "若画面里孩子调皮、爬人、搞怪，要突出好笑/调皮的一面，不要写成严肃育儿。"
         "若提供知识库约束（带 [n] 编号）："
         "1) 卖点/合规句必须改写自这些条目，禁止编造未出现的承诺；"
         "2) 每个镜头必须填 sourceIndex=所用条目编号；"
         "3) headline/body 要能对应到该编号内容。"
         "若提供用户素材列表：按素材顺序讲故事；"
-        "若素材带「内容描述」：headline/body/visualHint 必须贴合该描述的可见内容，"
+        "若素材带「内容描述」：headline/body/visualHint 必须贴合该描述的可见内容与情绪，"
         "禁止编造素材里没有的物体或情节；无内容描述时 visualHint 简述该素材如何出镜。"
         "按模板差异化："
-        "talking-captions→headline 口语短句、body 稍长便于口播、durationSec 偏 3.5～4.5；"
+        "talking-captions→headline 口语短句、body 稍长便于口播；"
         "kinetic-text→headline 极短有力（≤14字）、body 可空或一句、durationSec 偏 2～3；"
         "brand-intro→第1镜偏品牌开场（稍长）、末镜收束口号，中间镜讲卖点。"
     )
@@ -317,17 +324,19 @@ def _plan_with_rules(
         source_indices.append(None)
     beats = beats[:want]
     source_indices = source_indices[:want]
+    total_sec = target_total_duration_sec(mats)
+    base_dur = round(total_sec / max(1, want), 2)
 
     scenes: list[Scene] = []
     for i, beat in enumerate(beats):
         src_idx = source_indices[i] if i < len(source_indices) else None
         if template_id == "kinetic-text":
-            duration = 2.4 if i > 0 else 2.8
+            duration = min(3.0, max(2.0, base_dur))
             headline = beat[:14]
             body = ""
             hint = "快切大标题弹入"
         elif template_id == "brand-intro":
-            duration = 4.2 if i == 0 else (3.8 if i == len(beats) - 1 else 3.2)
+            duration = min(4.5, max(2.5, base_dur + (0.4 if i == 0 else 0)))
             headline = beat[:36]
             body = (brand_notes or "品牌印象 · AI 成片")[:60]
             hint = (
@@ -336,9 +345,10 @@ def _plan_with_rules(
                 else ("品牌框收束" if i == len(beats) - 1 else "品牌框卖点")
             )
         else:
-            duration = 4.0 if i == 0 else 3.5
+            duration = min(4.5, max(2.5, base_dur))
             headline = beat[:40]
-            body = (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]
+            # 规则兜底也尽量口语化，避免广告腔
+            body = (brand_notes or beat[:80] or "这画面也太真实了吧")[:80]
             hint = "底部口播字幕条滑入"
         if mats:
             mat = mats[i % len(mats)]
