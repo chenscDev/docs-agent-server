@@ -1263,16 +1263,23 @@ def _try_attach_full_narration(storyboard: Storyboard, video_path: Path) -> Path
         return video_path
 
 
-def _extract_single_thumb(video_path: Path, thumb_path: Path) -> Path | None:
+def _extract_single_thumb(
+    video_path: Path,
+    thumb_path: Path,
+    *,
+    ss: float = 0.25,
+) -> Path | None:
+    """从成片抽取一帧作为封面/缩略图。"""
     ffmpeg = _ffmpeg_bin()
     if not ffmpeg or not video_path.is_file():
         return None
     thumb_path = Path(thumb_path)
+    seek = max(0.0, float(ss))
     cmd = [
         ffmpeg,
         "-y",
         "-ss",
-        "0.25",
+        f"{seek:.2f}",
         "-i",
         str(video_path),
         "-frames:v",
@@ -1285,6 +1292,16 @@ def _extract_single_thumb(video_path: Path, thumb_path: Path) -> Path | None:
     if proc.returncode != 0 or not thumb_path.is_file():
         return None
     return thumb_path
+
+
+def extract_video_frame(
+    video_path: Path,
+    thumb_path: Path,
+    *,
+    ss: float = 0.25,
+) -> Path | None:
+    """对外：按秒数从成片抽帧。"""
+    return _extract_single_thumb(video_path, thumb_path, ss=ss)
 
 
 def _extract_scene_thumbs_from_mp4(

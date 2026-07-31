@@ -17,7 +17,7 @@ from app.core.ids import new_id
 from app.db.models import VideoJob
 from app.video.materials import normalize_materials
 from app.video.planner import patch_storyboard, plan_storyboard, refine_scene
-from app.video.renderer import render_storyboard_to_mp4
+from app.video.renderer import extract_video_frame, render_storyboard_to_mp4
 from app.video.schema import Storyboard, TemplateId, validate_storyboard
 
 logger = logging.getLogger(__name__)
@@ -709,6 +709,122 @@ def run_job_pipeline(job_id: str) -> None:
                 job.stage_message = "渲染失败"
             db.commit()
             logger.exception("video job failed id=%s", job_id)
+
+
+def resolve_local_media(url_or_path: str) -> Path | None:
+    """把 /cdn/video 或本地路径解析为文件（封面选用分镜缩略图时用）。"""
+    from app.video.renderer import _resolve_media_file
+
+    return _resolve_media_file(
+        url_or_path,
+        allowed_suffixes={".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4"},
+        default_suffix=".jpg",
+    )
+
+
+def set_job_cover(
+    db: Session,
+    job: VideoJob,
+    *,
+    scene_id: str | None = None,
+    at_sec: float | None = None,
+) -> VideoJob:
+    """
+    为已成片任务更换封面。
+    - sceneId：优先用该镜 thumbUrl；否则按该镜中点从成片抽帧
+    - atSec：从成片指定秒数抽帧
+    """
+    if job.status != "ready" or not job.output_url:
+        raise ValueError("任务尚未成片，无法设置封面")
+    if not scene_id and at_sec is None:
+        raise ValueError("请指定 sceneId 或 atSec")
+
+    settings = get_settings()
+    out_dir = Path(settings.video_output_dir)
+    if not out_dir.is_absolute():
+        out_dir = Path.cwd() / out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    video_path: Path | None = None
+    if job.output_path:
+        candidate = Path(job.output_path)
+        if candidate.is_file():
+            video_path = candidate
+    if video_path is None and job.output_url:
+        video_path = resolve_local_media(job.output_url)
+
+    cover_src: Path | None = None
+    board: Storyboard | None = None
+    if job.storyboard_json:
+        try:
+            board = validate_storyboard(json.loads(job.storyboard_json))
+        except Exception:  # noqa: BLE001
+            board = None
+
+    if scene_id:
+        scene = None
+        if board:
+            scene = next((s for s in board.scenes if s.id == scene_id), None)
+        if scene is None:
+            raise ValueError("未找到对应分镜")
+        if scene.thumbUrl:
+            cover_src = resolve_local_media(scene.thumbUrl)
+        if cover_src is None:
+            if video_path is None or not video_path.is_file():
+                raise ValueError("成片文件不在本地，无法从视频抽帧")
+            # 累计到该镜中点
+            t = 0.0
+            at = 0.25
+            if board is not None:
+                for sc in board.scenes:
+                    if sc.id == scene_id:
+                        at = t + max(
+                            0.1,
+                            min(sc.durationSec * 0.35, max(0.05, sc.durationSec - 0.05)),
+                        )
+                        break
+                    t += sc.durationSec
+            dest = out_dir / f"{job.id}_v{job.version}_cover_pick.jpg"
+            cover_src = extract_video_frame(video_path, dest, ss=at)
+    else:
+        if video_path is None or not video_path.is_file():
+            raise ValueError("成片文件不在本地，无法从视频抽帧")
+        duration = float(job.duration_sec or (board.total_duration_sec if board else 0) or 0)
+        ss = max(0.0, float(at_sec or 0.25))
+        if duration > 0:
+            ss = min(ss, max(0.0, duration - 0.05))
+        dest = out_dir / f"{job.id}_v{job.version}_cover_pick.jpg"
+        cover_src = extract_video_frame(video_path, dest, ss=ss)
+
+    if cover_src is None or not cover_src.is_file():
+        raise ValueError("生成封面失败，请稍后重试")
+
+    # 统一落到任务封面文件名，便于 CDN 镜像
+    final_cover = out_dir / f"{job.id}_v{job.version}_cover.jpg"
+    try:
+        if final_cover.resolve() != cover_src.resolve():
+            shutil.copyfile(cover_src, final_cover)
+    except OSError as exc:
+        raise ValueError(f"写入封面失败: {exc}") from exc
+
+    def public_url(name: str) -> str:
+        rel = f"/cdn/video/{Path(name).name}"
+        base = (settings.video_public_base_url or "").rstrip("/")
+        return f"{base}{rel}" if base else rel
+
+    mirror = (settings.video_cdn_mirror_dir or "").strip()
+    if mirror and final_cover.is_file():
+        try:
+            dest_dir = Path(mirror)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(final_cover, dest_dir / final_cover.name)
+        except OSError as exc:
+            logger.warning("镜像封面失败: %s", exc)
+
+    job.cover_url = public_url(final_cover.name)
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 def remix_job(

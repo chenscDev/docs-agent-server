@@ -44,6 +44,7 @@ from app.video.service import (
     publish_job,
     remix_job,
     request_job_cancel,
+    set_job_cover,
 )
 
 router = APIRouter(prefix="/v1/video", tags=["video"])
@@ -131,6 +132,15 @@ class ExportRatiosBody(BaseModel):
 
     ratios: list[str] | None = None
     auto_start: bool = Field(default=True, alias="autoStart")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SetCoverBody(BaseModel):
+    """更换成片封面：指定分镜或秒数。"""
+
+    scene_id: str | None = Field(default=None, alias="sceneId")
+    at_sec: float | None = Field(default=None, alias="atSec", ge=0, le=600)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -432,6 +442,30 @@ def post_export_ratios(
         "parentJobId": job_id,
         "items": [job_to_dict(c) for c in children],
     }
+
+
+@router.post("/jobs/{job_id}/cover")
+def post_set_cover(
+    job_id: str,
+    body: SetCoverBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """更换成片封面（分镜缩略图或指定秒数抽帧）。"""
+    job = get_job(db, job_id)
+    if job is None:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    try:
+        updated = set_job_cover(
+            db,
+            job,
+            scene_id=body.scene_id,
+            at_sec=body.at_sec,
+        )
+    except ValueError as exc:
+        raise_api_error(400, "SET_COVER_FAILED", str(exc)[:200])
+    except Exception as exc:  # noqa: BLE001
+        raise_api_error(400, "SET_COVER_FAILED", str(exc)[:200])
+    return job_to_dict(updated)
 
 
 @router.post("/jobs/{job_id}/publish")
