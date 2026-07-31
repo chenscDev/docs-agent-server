@@ -129,9 +129,20 @@ def create_job(
     if storyboard is not None:
         # 若客户端分镜未带素材，用 materials 补齐
         if mats:
-            from app.video.materials import attach_materials_to_scenes
+            from app.video.materials import (
+                attach_materials_to_scenes,
+                clamp_storyboard_duration,
+                parse_requested_duration_sec,
+                target_total_duration_sec,
+            )
 
             storyboard = attach_materials_to_scenes(storyboard, mats)
+            target = target_total_duration_sec(mats, prompt)
+            requested = parse_requested_duration_sec(prompt)
+            max_sec = None if requested is not None else 15.0
+            storyboard = clamp_storyboard_duration(
+                storyboard, target_sec=target, max_sec=max_sec
+            )
         job.storyboard_json = json.dumps(
             storyboard.to_public_dict(),
             ensure_ascii=False,
@@ -544,6 +555,13 @@ def run_job_pipeline(job_id: str) -> None:
                 board = plan_storyboard(
                     job.prompt,
                     template_id=job.template_id,  # type: ignore[arg-type]
+                    generation_type=(
+                        (json.loads(job.storyboard_json or "{}") or {}).get(
+                            "generationType"
+                        )
+                        if job.storyboard_json
+                        else None
+                    ),
                     knowledge_hint=hint,
                     materials=mats,
                 )

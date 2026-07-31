@@ -28,6 +28,43 @@ def scene_narration_text(*, headline: str, body: str = "") -> str:
     return text[:200] if text else ""
 
 
+def fit_narration_to_duration(
+    text: str,
+    duration_sec: float,
+    *,
+    speech_rate: float = 1.0,
+) -> str:
+    """
+    按镜头时长精简口播，避免合成后再大幅 atempo 加速听起来「赶」。
+
+    中文口播约 3.8～4.2 字/秒（语速 1.0）；speech_rate>1 时可多留一点字。
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    dur = max(1.0, float(duration_sec))
+    rate = max(0.5, min(2.0, float(speech_rate or 1.0)))
+    # 留 0.4s 呼吸；语速越快，同时间内可容纳字数略增
+    cps = 3.9 * rate
+    budget = int(max(10, (dur - 0.4) * cps))
+    if len(raw) <= budget:
+        return raw
+    cut = raw[:budget]
+    best = cut
+    for sep in ("。", "！", "？", "；", "，", "、", " "):
+        idx = cut.rfind(sep)
+        if idx >= max(8, budget // 2):
+            best = cut[: idx + (0 if sep == " " else 1)]
+            break
+    # 句读截得太短则保留硬截断，避免只剩半句标题
+    if len(best) < max(10, budget // 2):
+        best = cut.rstrip("，、； ")
+    best = best.rstrip("，、； ")
+    if best and not best.endswith(("。", "！", "？", "…")):
+        best = best + "…"
+    return best
+
+
 def synthesize_to_file(
     text: str,
     output_path: Path,

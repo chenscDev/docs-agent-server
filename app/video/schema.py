@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 TemplateId = Literal["talking-captions", "kinetic-text", "brand-intro"]
+GenerationType = Literal["narration", "kinetic", "brand", "visual-cut"]
 
 
 class Scene(BaseModel):
@@ -44,6 +45,8 @@ class Storyboard(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     prompt: str = Field(..., min_length=1, max_length=2000)
     templateId: TemplateId = "talking-captions"
+    # 生成类型：决定是否口播、默认模板与端上设置项
+    generationType: GenerationType = "narration"
     aspectRatio: Literal["9:16", "16:9", "1:1"] = "9:16"
     fps: int = Field(30, ge=24, le=60)
     scenes: list[Scene] = Field(..., min_length=1, max_length=12)
@@ -63,6 +66,8 @@ class Storyboard(BaseModel):
     bgmTrackId: str = Field("soft-pink", max_length=64)
     # 口播音色 id（见 tts_catalog）
     ttsVoice: str = Field("longxiaochun_v2", max_length=64)
+    # 是否合成 TTS 口播（纯画面剪辑为 False）
+    ttsEnabled: bool = True
 
     @field_validator("scenes")
     @classmethod
@@ -84,12 +89,14 @@ def validate_storyboard(data: dict[str, Any] | Storyboard) -> Storyboard:
     return Storyboard.model_validate(data)
 
 
-# 模板元数据（端上展示）
+# 模板元数据（端上展示 / Remotion 构图）
 TEMPLATE_CATALOG: list[dict[str, Any]] = [
     {
         "id": "talking-captions",
         "name": "口播字幕条",
         "description": "字幕条滑入 + 左侧强调色，适合一句话口播解说",
+        "effectLabel": "字幕滑入",
+        "effectHint": "底部字幕条自下而上滑入，口播节奏清晰",
         "coverColor": "#0F172A",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "soft-pink",
@@ -98,6 +105,8 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
         "id": "kinetic-text",
         "name": "图文快闪",
         "description": "色带 + 标题弹入上移，适合卖点快切罗列",
+        "effectLabel": "文字快闪",
+        "effectHint": "大标题弹入上移，卖点节奏更醒目",
         "coverColor": "#1E1B4B",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "bright-pulse",
@@ -106,8 +115,112 @@ TEMPLATE_CATALOG: list[dict[str, Any]] = [
         "id": "brand-intro",
         "name": "品牌片头",
         "description": "首镜放大入场、末镜收束淡出，适合开场品牌印象",
+        "effectLabel": "品牌开场",
+        "effectHint": "首镜放大入场、末镜淡出收束，品牌感更强",
         "coverColor": "#022C22",
         "defaultAspect": "9:16",
         "defaultBgmTrackId": "warm-pad",
     },
 ]
+
+# 生成类型（产品模式）：决定口播开关、默认模板与设置项显隐
+GENERATION_TYPE_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": "narration",
+        "name": "口播解说",
+        "description": "字幕条 + 旁白口播，适合讲故事/种草",
+        "emoji": "🗣️",
+        "coverColor": "#0F172A",
+        "defaultTemplateId": "talking-captions",
+        "defaultBgmTrackId": "soft-pink",
+        "ttsEnabled": True,
+        "showTts": True,
+        "showCaptionPosition": True,
+        "showLogo": True,
+        "plannerHint": (
+            "口播解说：headline 口语短句，body 为旁白；"
+            "须能在本镜时长内正常语速说完。"
+        ),
+    },
+    {
+        "id": "kinetic",
+        "name": "图文快闪",
+        "description": "大标题快切弹入，轻口播或短句旁白",
+        "emoji": "⚡",
+        "coverColor": "#1E1B4B",
+        "defaultTemplateId": "kinetic-text",
+        "defaultBgmTrackId": "bright-pulse",
+        "ttsEnabled": True,
+        "showTts": True,
+        "showCaptionPosition": False,
+        "showLogo": True,
+        "plannerHint": (
+            "图文快闪：headline 极短有力（≤14字），body 可空或一句短旁白；"
+            "durationSec 偏 2～3 秒。"
+        ),
+    },
+    {
+        "id": "brand",
+        "name": "品牌片头",
+        "description": "开场放大、收束口号，适合品牌印象",
+        "emoji": "✨",
+        "coverColor": "#022C22",
+        "defaultTemplateId": "brand-intro",
+        "defaultBgmTrackId": "warm-pad",
+        "ttsEnabled": True,
+        "showTts": True,
+        "showCaptionPosition": False,
+        "showLogo": True,
+        "plannerHint": (
+            "品牌片头：第1镜偏品牌开场，末镜收束口号；"
+            "中间镜讲卖点，可结合 Logo/品牌备注。"
+        ),
+    },
+    {
+        "id": "visual-cut",
+        "name": "纯画面剪辑",
+        "description": "无口播，素材快切 + 配乐，适合氛围片",
+        "emoji": "🎬",
+        "coverColor": "#334155",
+        "defaultTemplateId": "kinetic-text",
+        "defaultBgmTrackId": "bright-pulse",
+        "ttsEnabled": False,
+        "showTts": False,
+        "showCaptionPosition": False,
+        "showLogo": True,
+        "plannerHint": (
+            "纯画面剪辑：不要旁白口播；headline 极短标题（≤10字），"
+            "body 必须为空；靠素材节奏与配乐表达，不要写长解说。"
+        ),
+    },
+]
+
+
+def resolve_generation_type(type_id: str | None) -> dict[str, Any]:
+    """解析生成类型；未知则回落口播解说。"""
+    tid = (type_id or "").strip() or "narration"
+    for item in GENERATION_TYPE_CATALOG:
+        if item["id"] == tid:
+            return item
+    return GENERATION_TYPE_CATALOG[0]
+
+
+def apply_generation_type_defaults(
+    data: dict[str, Any],
+    generation_type: str | None = None,
+) -> dict[str, Any]:
+    """按生成类型补齐 templateId / ttsEnabled / 默认 BGM。"""
+    out = dict(data or {})
+    gtid = generation_type or out.get("generationType") or "narration"
+    meta = resolve_generation_type(str(gtid))
+    out["generationType"] = meta["id"]
+    out["templateId"] = meta["defaultTemplateId"]
+    out["ttsEnabled"] = bool(meta.get("ttsEnabled", True))
+    if not out.get("bgmTrackId"):
+        out["bgmTrackId"] = meta.get("defaultBgmTrackId") or "soft-pink"
+    # 纯画面默认开配乐
+    if meta["id"] == "visual-cut":
+        out["bgmEnabled"] = True
+        if out.get("bgmTrackId") == "off":
+            out["bgmTrackId"] = meta.get("defaultBgmTrackId") or "bright-pulse"
+    return out

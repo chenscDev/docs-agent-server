@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -17,6 +18,7 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.video.schema import Scene, Storyboard
 from app.video.tts import (
+    fit_narration_to_duration,
     probe_wav_duration_sec,
     scene_narration_text,
     synthesize_to_file,
@@ -197,7 +199,7 @@ def render_storyboard_to_mp4(
             "无法渲染视频：请安装 ffmpeg，或配置 Remotion / Remotion Lambda"
         )
 
-    if not result.has_audio:
+    if not result.has_audio and bool(getattr(storyboard, "ttsEnabled", True)):
         report("为成片合成旁白配音…", 0.90)
         voiced = _try_attach_full_narration(storyboard, result.output_path)
         if voiced:
@@ -539,17 +541,18 @@ def _try_ffmpeg(
                     f"镜头 {display_n}/{total} · 生成配音…",
                     base + 0.30 / total * 0.5,
                 )
-                voiced = _mux_scene_tts(
-                    ffmpeg,
-                    scene=scene,
-                    video_path=part,
-                    tmp_dir=tmp_path,
-                    speech_rate=storyboard.speechRate,
-                    voice_id=storyboard.ttsVoice,
-                )
-                if voiced is not None:
-                    part = voiced
-                    has_audio = True
+                if bool(getattr(storyboard, "ttsEnabled", True)):
+                    voiced = _mux_scene_tts(
+                        ffmpeg,
+                        scene=scene,
+                        video_path=part,
+                        tmp_dir=tmp_path,
+                        speech_rate=storyboard.speechRate,
+                        voice_id=storyboard.ttsVoice,
+                    )
+                    if voiced is not None:
+                        part = voiced
+                        has_audio = True
 
             if persist_dir is not None and part.is_file():
                 dest = persist_dir / f"{scene.id}_{sc_hash}.mp4"
@@ -725,13 +728,13 @@ def _build_scene_drawtext_vf(
                 f"fontcolor=white@0.85:x=(w-text_w)/2:y={my + int(bh * 0.58)}"
             )
     else:
-        # talking-captions
-        bar_h = max(96, int(height * 0.28))
+        # talking-captions：加高字幕条 + 略缩小字号，减少裁切
+        bar_h = max(140, int(height * 0.36))
         cap = (caption_position or "bottom").strip()
         if cap == "top":
             bar_y = 0
         elif cap == "center":
-            bar_y = int(height * 0.36)
+            bar_y = int(height * 0.34)
         else:
             bar_y = height - bar_h
         parts.append(
@@ -740,17 +743,34 @@ def _build_scene_drawtext_vf(
         parts.append(
             f"drawbox=x=0:y={bar_y}:w=14:h={bar_h}:color={accent}@1:t=fill"
         )
-        parts.append(
-            f"drawtext=fontfile='{font_q}':text='{headline}':fontsize=40:"
-            f"fontcolor=white:x=36:y={bar_y + 28}"
-        )
-        if body:
+        # 按字数硬换行，避免单行画出字幕条
+        hl_lines = _wrap_cjk_lines(scene.headline or "", 14)[:2]
+        body_lines = _wrap_cjk_lines(scene.body or "", 18)[:3]
+        y = bar_y + 22
+        for i, line in enumerate(hl_lines):
+            esc = _escape_drawtext(line)
             parts.append(
-                f"drawtext=fontfile='{font_q}':text='{body}':fontsize=24:"
-                f"fontcolor=white@0.88:x=36:y={bar_y + 88}"
+                f"drawtext=fontfile='{font_q}':text='{esc}':fontsize=34:"
+                f"fontcolor=white:x=36:y={y + i * 40}"
+            )
+        y = bar_y + 22 + len(hl_lines) * 40 + 8
+        for i, line in enumerate(body_lines):
+            esc = _escape_drawtext(line)
+            parts.append(
+                f"drawtext=fontfile='{font_q}':text='{esc}':fontsize=22:"
+                f"fontcolor=white@0.88:x=36:y={y + i * 30}"
             )
 
     return ",".join(parts)
+
+
+def _wrap_cjk_lines(text: str, max_chars: int) -> list[str]:
+    """按字数折行（中文无空格）。"""
+    s = re.sub(r"\s+", "", (text or "").strip())
+    if not s:
+        return []
+    max_chars = max(4, int(max_chars))
+    return [s[i : i + max_chars] for i in range(0, len(s), max_chars)]
 
 
 def _make_scene_card_png(
@@ -805,14 +825,14 @@ def _make_scene_card_png(
     for fp in font_paths:
         if Path(fp).is_file():
             try:
-                font_large = ImageFont.truetype(fp, 48)
-                font_small = ImageFont.truetype(fp, 28)
+                font_large = ImageFont.truetype(fp, 36)
+                font_small = ImageFont.truetype(fp, 24)
                 break
             except OSError:
                 continue
 
-    headline = (scene.headline or "")[:40]
-    body = (scene.body or "")[:60]
+    headline = (scene.headline or "")[:48]
+    body = (scene.body or "")[:90]
     tid = (template_id or "talking-captions").strip()
 
     # 模板装饰差异
@@ -858,25 +878,57 @@ def _make_scene_card_png(
         title_y = int(height * 0.42)
         body_y = int(height * 0.55)
     else:
-        # talking-captions：字幕条（上/中/下）+ 左对齐文案
-        bar_h = int(height * 0.28)
+        # talking-captions：加高字幕条 + 自动折行，避免字幕被裁切
+        bar_h = int(height * 0.36)
         bar_fill = (0, 0, 0, 220) if transparent_bg else (0, 0, 0)
         accent_fill = (*accent_rgb, 255) if transparent_bg else accent_rgb
         cap = (caption_position or "bottom").strip()
         if cap == "top":
             bar_y0, bar_y1 = 0, bar_h
         elif cap == "center":
-            bar_y0 = int(height * 0.36)
+            bar_y0 = int(height * 0.34)
             bar_y1 = bar_y0 + bar_h
         else:
             bar_y0, bar_y1 = height - bar_h, height
         draw.rectangle([0, bar_y0, width, bar_y1], fill=bar_fill)
         draw.rectangle([0, bar_y0, 14, bar_y1], fill=accent_fill)
-        title_y = bar_y0 + 36
+        title_y = bar_y0 + 28
         body_y = bar_y0 + 100
 
     text_fill = (255, 255, 255, 255) if transparent_bg else (255, 255, 255)
     box_fill = (0, 0, 0, 180) if transparent_bg else (0, 0, 0)
+    max_text_w = width - 72
+
+    def _measure(text: str, font) -> tuple[int, int]:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    def _wrap_to_width(text: str, font, max_w: int, max_lines: int) -> list[str]:
+        raw = (text or "").strip()
+        if not raw:
+            return []
+        lines: list[str] = []
+        cur = ""
+        for ch in raw:
+            trial = cur + ch
+            tw, _ = _measure(trial, font)
+            if tw <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = ch
+                if len(lines) >= max_lines:
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        elif cur and lines:
+            # 末行加省略
+            last = lines[-1]
+            ell = "…"
+            while last and _measure(last + ell, font)[0] > max_w:
+                last = last[:-1]
+            lines[-1] = (last + ell) if last else ell
+        return lines
 
     def _draw_text(text: str, font, y: int, *, boxed: bool = True) -> None:
         if not text:
@@ -896,8 +948,20 @@ def _make_scene_card_png(
             )
         draw.text((x, y), text, fill=text_fill, font=font)
 
-    _draw_text(headline, font_large, title_y, boxed=True)
-    _draw_text(body, font_small, body_y, boxed=tid != "talking-captions")
+    if tid == "talking-captions":
+        hl_lines = _wrap_to_width(headline, font_large, max_text_w, 2)
+        body_lines = _wrap_to_width(body, font_small, max_text_w, 3)
+        y = title_y
+        for line in hl_lines:
+            _draw_text(line, font_large, y, boxed=False)
+            y += 42
+        y += 6
+        for line in body_lines:
+            _draw_text(line, font_small, y, boxed=False)
+            y += 32
+    else:
+        _draw_text(headline, font_large, title_y, boxed=True)
+        _draw_text(body, font_small, body_y, boxed=tid != "talking-captions")
     output.parent.mkdir(parents=True, exist_ok=True)
     img.save(output, format="PNG")
     return output if output.is_file() else None
@@ -1056,6 +1120,21 @@ def _render_scene_clip(
     return True
 
 
+def _atempo_chain(speed: float) -> str:
+    """生成 ffmpeg atempo 链（单段仅支持 0.5～2.0）。"""
+    speed = max(0.5, min(3.0, float(speed)))
+    factors: list[float] = []
+    remaining = speed
+    while remaining > 2.0 + 1e-6:
+        factors.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5 - 1e-6:
+        factors.append(0.5)
+        remaining /= 0.5
+    factors.append(round(remaining, 4))
+    return ",".join(f"atempo={f}" for f in factors)
+
+
 def _mux_scene_tts(
     ffmpeg: str,
     *,
@@ -1065,10 +1144,26 @@ def _mux_scene_tts(
     speech_rate: float = 1.0,
     voice_id: str | None = None,
 ) -> Path | None:
-    """为单镜合成配音并混入；失败返回 None（保留静音片）。"""
-    text = scene_narration_text(headline=scene.headline, body=scene.body or "")
+    """为单镜合成配音并混入；失败返回 None（保留静音片）。
+
+    画面时长严格按 scene.durationSec。
+    先按时长精简口播再 TTS；仅在仍略长时轻微加速（≤1.15x），避免听起来过快。
+    """
+    scene_dur = max(1.0, float(scene.durationSec))
+    raw = scene_narration_text(headline=scene.headline, body=scene.body or "")
+    text = fit_narration_to_duration(
+        raw, scene_dur, speech_rate=speech_rate
+    )
     if not text:
         return None
+    if text != raw:
+        logger.info(
+            "口播按时长精简 scene=%s %s→%s字 dur=%.1fs",
+            scene.index,
+            len(raw),
+            len(text),
+            scene_dur,
+        )
     audio_path = synthesize_to_file(
         text,
         tmp_dir / f"{scene.index:02d}.wav",
@@ -1078,46 +1173,39 @@ def _mux_scene_tts(
     if audio_path is None:
         return None
 
-    # 若语音更长，拉长画面；更短则循环/补静音由 -shortest 截断音频侧，这里用 apad
-    duration = probe_wav_duration_sec(audio_path) or scene.durationSec
-    target_dur = max(scene.durationSec, min(duration + 0.3, 15.0))
+    audio_dur = probe_wav_duration_sec(audio_path) or scene_dur
 
     out = tmp_dir / f"{scene.index:02d}_voiced.mp4"
-    # 先把视频时长对齐到 target_dur：不够则定格末帧，禁止整段循环（否则像同一动作反复播）
-    stretched = tmp_dir / f"{scene.index:02d}_len.mp4"
-    stretch_cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(video_path),
-        "-vf",
-        f"tpad=stop_mode=clone:stop_duration={max(target_dur, 15.0):.2f}",
-        "-t",
-        f"{target_dur:.2f}",
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-an",
-        str(stretched),
-    ]
-    proc = subprocess.run(stretch_cmd, capture_output=True, text=True, check=False)
-    if proc.returncode != 0 or not stretched.is_file():
-        logger.warning("对齐镜头时长失败: %s", (proc.stderr or "")[-300:])
-        stretched = video_path
+    af_parts: list[str] = []
+    if audio_dur > scene_dur + 0.12:
+        # 仅允许轻微加速；仍超长交给 atrim 截尾，不再 2x 赶读
+        speed = min(1.15, audio_dur / scene_dur)
+        if speed > 1.02:
+            af_parts.append(_atempo_chain(speed))
+    # 偏短补静音，偏长截断，保证与画面同长
+    af_parts.append(f"apad=whole_dur={scene_dur:.3f}")
+    af_parts.append(f"atrim=0:{scene_dur:.3f}")
+    af = ",".join(af_parts)
 
     mux_cmd = [
         ffmpeg,
         "-y",
         "-i",
-        str(stretched),
+        str(video_path),
         "-i",
         str(audio_path),
+        "-filter_complex",
+        f"[1:a]{af}[a]",
+        "-map",
+        "0:v",
+        "-map",
+        "[a]",
+        "-t",
+        f"{scene_dur:.3f}",
         "-c:v",
         "copy",
         "-c:a",
         "aac",
-        "-shortest",
         str(out),
     ]
     proc = subprocess.run(mux_cmd, capture_output=True, text=True, check=False)

@@ -24,7 +24,12 @@ from app.video.bgm_catalog import list_bgm_tracks
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
 from app.video.render_queue import enqueue_video_job
-from app.video.schema import TEMPLATE_CATALOG, TemplateId, validate_storyboard
+from app.video.schema import (
+    GENERATION_TYPE_CATALOG,
+    TEMPLATE_CATALOG,
+    TemplateId,
+    validate_storyboard,
+)
 from app.video.tts_catalog import list_tts_voices
 from app.video.preview_page import build_preview_html
 from app.video.service import (
@@ -57,6 +62,7 @@ class MaterialItem(BaseModel):
 class CreateJobBody(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     template_id: TemplateId = Field(default="talking-captions", alias="templateId")
+    generation_type: str | None = Field(default=None, alias="generationType")
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
     knowledge_base_ids: list[str] | None = Field(default=None, alias="knowledgeBaseIds")
     auto_start: bool = Field(default=True, alias="autoStart")
@@ -77,6 +83,7 @@ class CreateJobBody(BaseModel):
 class PlanBody(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     template_id: TemplateId = Field(default="talking-captions", alias="templateId")
+    generation_type: str | None = Field(default=None, alias="generationType")
     brand_notes: str = Field(default="", alias="brandNotes")
     knowledge_hint: str = Field(default="", alias="knowledgeHint")
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
@@ -159,6 +166,12 @@ class CancelJobBody(BaseModel):
 @router.get("/templates")
 def get_templates() -> dict[str, Any]:
     return {"items": TEMPLATE_CATALOG}
+
+
+@router.get("/generation-types")
+def get_generation_types() -> dict[str, Any]:
+    """生成类型目录：口播 / 快闪 / 品牌 / 纯画面等。"""
+    return {"items": GENERATION_TYPE_CATALOG}
 
 
 @router.get("/bgm-tracks")
@@ -300,17 +313,26 @@ def remove_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 @router.post("/jobs")
 def post_job(body: CreateJobBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from app.video.schema import apply_generation_type_defaults
+
     board = None
     if body.storyboard:
         try:
-            board = validate_storyboard(body.storyboard)
+            data = apply_generation_type_defaults(
+                body.storyboard, body.generation_type
+            )
+            board = validate_storyboard(data)
         except Exception as exc:  # noqa: BLE001
             raise_api_error(400, "STORYBOARD_INVALID", str(exc)[:200])
+
+    template_id = body.template_id
+    if board is not None:
+        template_id = board.templateId
 
     job = create_job(
         db,
         prompt=body.prompt,
-        template_id=body.template_id,
+        template_id=template_id,
         knowledge_base_id=normalize_knowledge_base_ids(
             body.knowledge_base_id,
             body.knowledge_base_ids,
@@ -571,6 +593,7 @@ def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingRespo
         yield from iter_creative_plan_sse(
             prompt=body.prompt,
             template_id=body.template_id,
+            generation_type=body.generation_type,
             brand_notes=body.brand_notes,
             knowledge_hint=hint,
             materials=[m.model_dump() for m in (body.materials or [])],

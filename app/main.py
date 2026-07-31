@@ -28,6 +28,7 @@ from app.api import (
 from app.core.auth import ApiTokenAuthMiddleware
 from app.core.config import get_settings
 from app.core.errors import error_detail
+from app.video.bgm_catalog import bgm_assets_dir
 from app.core.request_log import RequestLogMiddleware
 from app.db.session import init_db
 from app.rag.parse_queue import start_parse_queue, stop_parse_queue
@@ -119,6 +120,14 @@ app.include_router(video.router)
 _settings = get_settings()
 _video_dir = Path(_settings.video_output_dir)
 _video_dir.mkdir(parents=True, exist_ok=True)
+# BGM 试听：先挂更具体的路径，再挂整棵 video 目录
+_bgm_dir = bgm_assets_dir()
+if _bgm_dir.is_dir():
+    app.mount(
+        "/cdn/video/bgm",
+        StaticFiles(directory=str(_bgm_dir)),
+        name="cdn-bgm",
+    )
 app.mount(
     "/cdn/video",
     StaticFiles(directory=str(_video_dir)),

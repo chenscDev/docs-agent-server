@@ -11,11 +11,20 @@ from app.core.ids import new_id
 from app.core.llm import LLMClient
 from app.video.materials import (
     attach_materials_to_scenes,
+    clamp_storyboard_duration,
     normalize_materials,
+    parse_requested_duration_sec,
     target_scene_count,
     target_total_duration_sec,
 )
-from app.video.schema import Scene, Storyboard, TemplateId, validate_storyboard
+from app.video.schema import (
+    Scene,
+    Storyboard,
+    TemplateId,
+    apply_generation_type_defaults,
+    resolve_generation_type,
+    validate_storyboard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +39,7 @@ def plan_storyboard(
     prompt: str,
     *,
     template_id: TemplateId = "talking-captions",
+    generation_type: str | None = None,
     brand_notes: str = "",
     knowledge_hint: str = "",
     materials: list[dict[str, Any]] | None = None,
@@ -39,6 +49,11 @@ def plan_storyboard(
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("prompt 不能为空")
+
+    gmeta = resolve_generation_type(generation_type)
+    # 生成类型锁定默认模板（客户端传了 template 也以类型为准，避免错配）
+    template_id = gmeta["defaultTemplateId"]  # type: ignore[assignment]
+    type_hint = str(gmeta.get("plannerHint") or "")
 
     mats = normalize_materials(materials)
     board: Storyboard | None = None
@@ -50,6 +65,8 @@ def plan_storyboard(
                 brand_notes=brand_notes,
                 knowledge_hint=knowledge_hint,
                 materials=mats,
+                generation_hint=type_hint,
+                generation_type=str(gmeta["id"]),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("LLM 分镜失败，回退规则: %s", exc)
@@ -62,8 +79,27 @@ def plan_storyboard(
             brand_notes=brand_notes,
             knowledge_hint=knowledge_hint,
             materials=mats,
+            generation_type=str(gmeta["id"]),
         )
-    return attach_materials_to_scenes(board, mats)
+    board = attach_materials_to_scenes(board, mats)
+    # 写回生成类型与 TTS 开关
+    data = apply_generation_type_defaults(
+        board.model_dump(), generation_type=str(gmeta["id"])
+    )
+    # 纯画面：清空 body，避免残留口播文案进字幕
+    if not bool(gmeta.get("ttsEnabled", True)):
+        for sc in data.get("scenes") or []:
+            sc["body"] = ""
+            hl = (sc.get("headline") or "")[:10]
+            sc["headline"] = hl or "画面"
+    board = validate_storyboard(data)
+    # 默认成片 10～15 秒；描述里写了明确时长则尊重该目标
+    target = target_total_duration_sec(mats, prompt)
+    requested = parse_requested_duration_sec(prompt)
+    max_sec = None if requested is not None else 15.0
+    return clamp_storyboard_duration(
+        board, target_sec=target, max_sec=max_sec
+    )
 
 
 def _looks_like_refine_command(instruction: str) -> bool:
@@ -211,6 +247,8 @@ def _plan_with_llm(
     brand_notes: str,
     knowledge_hint: str,
     materials: list[dict[str, str]] | None = None,
+    generation_hint: str = "",
+    generation_type: str = "narration",
 ) -> Storyboard | None:
     try:
         llm = LLMClient()
@@ -219,8 +257,14 @@ def _plan_with_llm(
 
     mats = normalize_materials(materials)
     scene_n = target_scene_count(mats, default=4)
-    total_sec = target_total_duration_sec(mats)
+    total_sec = target_total_duration_sec(mats, prompt)
     per_sec = round(total_sec / max(1, scene_n), 1)
+    requested = parse_requested_duration_sec(prompt)
+    dur_rule = (
+        f"用户明确要求约 {requested:.0f} 秒，请按此总时长规划。"
+        if requested is not None
+        else "默认总时长约 10～15 秒（目标约 12 秒），除非用户写了秒数否则不要超过 15 秒。"
+    )
     system = (
         "你是短视频分镜导演。只输出 JSON，不要 Markdown。"
         "字段：title, templateId, aspectRatio, fps, scenes[], brandNotes, logoUrl。"
@@ -229,6 +273,7 @@ def _plan_with_llm(
         "imageUrl/videoUrl 默认可留空（服务端会按素材列表自动填充）。"
         f"竖屏 9:16，镜头约 {scene_n} 个，总时长约 {total_sec:.0f} 秒"
         f"（每镜 durationSec 约 {per_sec}，范围 2～5）。"
+        f"{dur_rule}"
         "颜色用 #RRGGBB。"
         "文案语气：生活化口语，像朋友发朋友圈/短视频口播，可以俏皮、调侃、抓反差；"
         "少用「培养」「陪伴成长」「温馨时光」「品质生活」等正式广告腔。"
@@ -241,13 +286,16 @@ def _plan_with_llm(
         "若素材带「内容描述」：headline/body/visualHint 必须贴合该描述的可见内容与情绪，"
         "禁止编造素材里没有的物体或情节；无内容描述时 visualHint 简述该素材如何出镜。"
         "按模板差异化："
-        "talking-captions→headline 口语短句、body 稍长便于口播；"
+        "talking-captions→headline 口语短句（≤16字）、body 口播按镜长估算（约每秒 3～4 字），须能正常语速说完；"
         "kinetic-text→headline 极短有力（≤14字）、body 可空或一句、durationSec 偏 2～3；"
         "brand-intro→第1镜偏品牌开场（稍长）、末镜收束口号，中间镜讲卖点。"
     )
+    if generation_hint.strip():
+        system += f"当前生成类型要求：{generation_hint.strip()}"
     user_parts = [
         f"用户一句话：{prompt}",
         f"模板：{template_id}",
+        f"生成类型：{generation_type}",
         f"建议镜头数：{scene_n}",
     ]
     if brand_notes.strip():
@@ -304,11 +352,13 @@ def _plan_with_rules(
     brand_notes: str,
     knowledge_hint: str,
     materials: list[dict[str, str]] | None = None,
+    generation_type: str = "narration",
 ) -> Storyboard:
     """无 LLM 时的确定性分镜（演示/评测可用）。"""
     bg, accent = _PALETTES.get(template_id, _PALETTES["talking-captions"])
     title = _short_title(prompt)
     mats = normalize_materials(materials)
+    no_tts = generation_type == "visual-cut"
     kb_beats = _parse_kb_beats(knowledge_hint)
     if kb_beats:
         beats = [b["text"] for b in kb_beats[:5]]
@@ -324,17 +374,17 @@ def _plan_with_rules(
         source_indices.append(None)
     beats = beats[:want]
     source_indices = source_indices[:want]
-    total_sec = target_total_duration_sec(mats)
+    total_sec = target_total_duration_sec(mats, prompt)
     base_dur = round(total_sec / max(1, want), 2)
 
     scenes: list[Scene] = []
     for i, beat in enumerate(beats):
         src_idx = source_indices[i] if i < len(source_indices) else None
-        if template_id == "kinetic-text":
+        if no_tts or template_id == "kinetic-text":
             duration = min(3.0, max(2.0, base_dur))
-            headline = beat[:14]
+            headline = beat[:10] if no_tts else beat[:14]
             body = ""
-            hint = "快切大标题弹入"
+            hint = "纯画面快切" if no_tts else "快切大标题弹入"
         elif template_id == "brand-intro":
             duration = min(4.5, max(2.5, base_dur + (0.4 if i == 0 else 0)))
             headline = beat[:36]
@@ -356,10 +406,13 @@ def _plan_with_rules(
             cap = (mat.get("caption") or "").strip()
             if cap:
                 hint = cap[:120]
+                if no_tts:
+                    headline = (cap[:10] or headline)
+                    body = ""
                 # 有内容描述时，规则兜底也尽量把口播贴近画面
-                if not body or body == (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]:
+                elif not body or body == (brand_notes or beat[:80] or "口播解说 · 字幕条")[:80]:
                     body = cap[:80]
-                if template_id == "kinetic-text":
+                if template_id == "kinetic-text" and not no_tts:
                     headline = (cap[:14] or headline)
                 elif len(headline) < 4:
                     headline = cap[:36]
@@ -399,10 +452,12 @@ def _plan_with_rules(
         title=title,
         prompt=prompt,
         templateId=template_id,
+        generationType=generation_type,  # type: ignore[arg-type]
         aspectRatio="9:16",
         fps=30,
         scenes=scenes,
         brandNotes=brand_notes or "",
+        ttsEnabled=not no_tts,
     )
 
 

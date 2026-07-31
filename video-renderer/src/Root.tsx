@@ -125,7 +125,7 @@ const TalkingCaptionsScene: React.FC<SceneCompProps> = ({
   const frame = useCurrentFrame();
   const {fps, height} = useVideoConfig();
   const accent = scene.accentColor || '#38BDF8';
-  const barH = Math.round(height * 0.28);
+  const barH = Math.round(height * 0.36);
   const slideIn = Math.max(1, Math.round(fps * 0.28));
   const opacity = interpolate(frame, [0, slideIn], [0, 1], {
     extrapolateRight: 'clamp',
@@ -154,7 +154,7 @@ const TalkingCaptionsScene: React.FC<SceneCompProps> = ({
       ? {top: 0, transform: `translateY(${slide}px)`}
       : captionPosition === 'center'
         ? {
-            top: Math.round(height * 0.36),
+            top: Math.round(height * 0.34),
             transform: `translateY(${slide}px)`,
           }
         : {bottom: 0, transform: `translateY(${slide}px)`};
@@ -170,18 +170,28 @@ const TalkingCaptionsScene: React.FC<SceneCompProps> = ({
           ...barPos,
           backgroundColor: 'rgba(0,0,0,0.88)',
           borderLeft: `14px solid ${accent}`,
-          padding: '28px 36px',
+          padding: '24px 32px',
           opacity,
           boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
         <div
           style={{
             color: '#fff',
-            fontSize: 42,
+            fontSize: 34,
             fontWeight: 700,
-            lineHeight: 1.25,
+            lineHeight: 1.35,
             letterSpacing: 0.5,
+            wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
           }}
         >
           {scene.headline}
@@ -189,10 +199,17 @@ const TalkingCaptionsScene: React.FC<SceneCompProps> = ({
         {scene.body ? (
           <div
             style={{
-              marginTop: 12,
+              marginTop: 10,
               color: 'rgba(255,255,255,0.88)',
-              fontSize: 24,
+              fontSize: 22,
+              lineHeight: 1.4,
               opacity: bodyOpacity,
+              wordBreak: 'break-word',
+              overflowWrap: 'anywhere',
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
             }}
           >
             {scene.body}

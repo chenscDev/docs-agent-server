@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 from typing import Any, Literal
@@ -12,10 +13,90 @@ from app.video.schema import Storyboard, validate_storyboard
 MaterialKind = Literal["image", "video"]
 
 _MAX_MATERIALS = 9
-# 有用户视频时，成片目标总时长（秒）
-_TARGET_VIDEO_TOTAL_SEC = 10.0
+# 默认成片目标（秒）；无用户明确时长时落在 10～15
+_TARGET_VIDEO_TOTAL_SEC = 12.0
+_MAX_DEFAULT_TOTAL_SEC = 15.0
 
 logger = logging.getLogger(__name__)
+
+
+def parse_requested_duration_sec(prompt: str) -> float | None:
+    """从创意描述解析用户明确要求的时长；未写则返回 None。"""
+    text = (prompt or "").strip()
+    if not text:
+        return None
+    # 约 20 秒 / 做成 15s / 时长 12秒
+    m = re.search(
+        r"(?:约|大概|左右|做成|生成|时长|一共|总共|控制在|不超过)?"
+        r"\s*(\d{1,2}(?:\.\d)?)\s*(?:秒|s\b)",
+        text,
+        re.IGNORECASE,
+    )
+    if m:
+        return float(m.group(1))
+    m = re.search(r"(\d{1,2}(?:\.\d)?)\s*分钟", text)
+    if m:
+        return float(m.group(1)) * 60.0
+    # 中文数字简写
+    cn = {
+        "十秒": 10.0,
+        "十五秒": 15.0,
+        "二十秒": 20.0,
+        "三十秒": 30.0,
+        "半分钟": 30.0,
+        "一分钟": 60.0,
+    }
+    for k, v in cn.items():
+        if k in text:
+            return v
+    return None
+
+
+def target_total_duration_sec(
+    materials: list[dict[str, str]] | None,
+    prompt: str = "",
+) -> float:
+    """
+    成片目标总时长。
+
+    - 描述里写了明确秒数：尊重（上限 60）
+    - 否则默认约 12 秒，且不超过 15 秒
+    """
+    requested = parse_requested_duration_sec(prompt)
+    if requested is not None:
+        return max(3.0, min(60.0, requested))
+    mats = normalize_materials(materials)
+    if any(m.get("kind") == "video" for m in mats):
+        return _TARGET_VIDEO_TOTAL_SEC
+    return _TARGET_VIDEO_TOTAL_SEC
+
+
+def clamp_storyboard_duration(
+    board: "Storyboard",
+    *,
+    target_sec: float,
+    max_sec: float | None = None,
+) -> "Storyboard":
+    """等比压缩各镜 durationSec，使总时长落在 target（且不超过 max）。"""
+    from app.video.schema import validate_storyboard
+
+    limit = float(target_sec)
+    if max_sec is not None:
+        limit = min(limit, float(max_sec))
+    limit = max(3.0, limit)
+    total = float(board.total_duration_sec or 0)
+    if total <= 0 or total <= limit + 0.08:
+        return board
+    scale = limit / total
+    data = board.model_dump()
+    for sc in data.get("scenes") or []:
+        d = float(sc.get("durationSec") or 3.0) * scale
+        sc["durationSec"] = max(1.0, round(d, 2))
+    try:
+        return validate_storyboard(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("clamp_storyboard_duration 失败: %s", exc)
+        return board
 
 
 def normalize_materials(raw: list[Any] | None) -> list[dict[str, str]]:
@@ -262,11 +343,3 @@ def target_scene_count(materials: list[dict[str, str]] | None, default: int = 4)
     if videos and len(mats) <= 2:
         return max(2, min(4, len(mats) + 1))
     return max(3, min(_MAX_MATERIALS, len(mats)))
-
-
-def target_total_duration_sec(materials: list[dict[str, str]] | None) -> float:
-    """有视频素材时目标成片约 10 秒。"""
-    mats = normalize_materials(materials)
-    if any(m.get("kind") == "video" for m in mats):
-        return _TARGET_VIDEO_TOTAL_SEC
-    return 16.0

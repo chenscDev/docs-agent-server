@@ -13,6 +13,7 @@ BGM_TRACKS: list[dict[str, Any]] = [
         "id": "soft-pink",
         "name": "柔和铺底",
         "description": "三和弦轻垫，适合口播解说",
+        "mood": "轻松 · 解说",
         "templates": ["talking-captions", "brand-intro", "kinetic-text"],
         "defaultFor": ["talking-captions"],
         "file": "soft-pink.wav",
@@ -24,6 +25,7 @@ BGM_TRACKS: list[dict[str, Any]] = [
         "id": "bright-pulse",
         "name": "轻快脉冲",
         "description": "带轻微颤音，适合卖点快闪",
+        "mood": "轻快 · 节奏",
         "templates": ["kinetic-text", "talking-captions"],
         "defaultFor": ["kinetic-text"],
         "file": "bright-pulse.wav",
@@ -35,6 +37,7 @@ BGM_TRACKS: list[dict[str, Any]] = [
         "id": "warm-pad",
         "name": "暖垫氛围",
         "description": "偏低暖色和弦，适合品牌开场",
+        "mood": "温暖 · 品牌",
         "templates": ["brand-intro", "talking-captions"],
         "defaultFor": ["brand-intro"],
         "file": "warm-pad.wav",
@@ -46,6 +49,7 @@ BGM_TRACKS: list[dict[str, Any]] = [
         "id": "off",
         "name": "无配乐",
         "description": "仅口播，不混 BGM",
+        "mood": "静音",
         "templates": ["talking-captions", "kinetic-text", "brand-intro"],
         "defaultFor": [],
         "file": "",
@@ -80,14 +84,23 @@ def list_bgm_tracks(*, template_id: str | None = None) -> list[dict[str, Any]]:
         if tid and tid not in (t.get("templates") or []):
             continue
         has_file = resolve_track_file(t) is not None
+        track_id = str(t["id"])
+        preview_url = ""
+        if has_file and track_id != "off":
+            # 与 main.py 挂载的 /cdn/video/bgm 对齐
+            fname = str(t.get("file") or "").strip()
+            if fname:
+                preview_url = f"/cdn/video/bgm/{Path(fname).name}"
         items.append(
             {
-                "id": t["id"],
+                "id": track_id,
                 "name": t["name"],
                 "description": t["description"],
                 "templates": list(t.get("templates") or []),
                 "isDefault": tid in (t.get("defaultFor") or []),
                 "hasFile": has_file,
+                "previewUrl": preview_url,
+                "mood": str(t.get("mood") or ""),
             }
         )
     return items

@@ -206,22 +206,28 @@ def build_preview_html() -> str:
       bar.style.display = 'block';
       bar.style.left = '0';
       bar.style.right = '0';
-      bar.style.height = '28%';
+      bar.style.height = '36%';
       bar.style.top = 'auto';
       bar.style.bottom = 'auto';
       if (capPos === 'top') {
         bar.style.top = '0';
       } else if (capPos === 'center') {
-        bar.style.top = '36%';
+        bar.style.top = '34%';
       } else {
         bar.style.bottom = '0';
       }
       bar.style.background = 'rgba(0,0,0,0.88)';
       bar.style.borderLeft = '10px solid ' + accent;
       bar.style.borderRadius = '0';
-      headline.style.fontSize = '22px';
+      bar.style.overflow = 'hidden';
+      headline.style.fontSize = '20px';
+      headline.style.lineHeight = '1.35';
+      headline.style.wordBreak = 'break-word';
       headline.style.textAlign = 'left';
       headline.style.letterSpacing = '0.5px';
+      body.style.fontSize = '14px';
+      body.style.lineHeight = '1.4';
+      body.style.wordBreak = 'break-word';
       body.style.textAlign = 'left';
     }
 

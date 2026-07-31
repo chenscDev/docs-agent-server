@@ -107,6 +107,7 @@ def iter_creative_plan_sse(
     *,
     prompt: str,
     template_id: TemplateId = "talking-captions",
+    generation_type: str | None = None,
     brand_notes: str = "",
     knowledge_hint: str = "",
     materials: list[dict[str, Any]] | None = None,
@@ -211,6 +212,7 @@ def iter_creative_plan_sse(
         draft = plan_storyboard(
             prompt,
             template_id=template_id,
+            generation_type=generation_type,
             brand_notes=brand_notes,
             knowledge_hint="",
             materials=mats,
@@ -244,6 +246,7 @@ def iter_creative_plan_sse(
             final = plan_storyboard(
                 prompt,
                 template_id=template_id,
+                generation_type=generation_type,
                 brand_notes=brand_notes,
                 knowledge_hint=knowledge_hint,
                 materials=mats,
