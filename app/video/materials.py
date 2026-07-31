@@ -332,14 +332,32 @@ def _resolve_for_probe(url_or_path: str) -> str | None:
     return None
 
 
-def target_scene_count(materials: list[dict[str, str]] | None, default: int = 4) -> int:
-    """有素材时镜头数贴近素材数；单视频约 3 镜凑满约 10 秒。"""
+def target_scene_count(
+    materials: list[dict[str, str]] | None,
+    default: int = 4,
+    *,
+    generation_type: str | None = None,
+) -> int:
+    """
+    有素材时镜头数贴近素材数。
+    - visual-cut / 单段视频：1 镜（抖音式原片包装，不切多镜）
+    - 多图口播：贴近图片数
+    """
+    gtid = (generation_type or "").strip()
     mats = normalize_materials(materials)
+    if gtid == "visual-cut":
+        return 1
     if not mats:
         return max(3, min(6, default))
     videos = [m for m in mats if m.get("kind") == "video"]
-    if len(videos) == 1 and len(mats) == 1:
-        return 3
+    images = [m for m in mats if m.get("kind") == "image"]
+    # 仅一段视频：不再切成 3 镜
+    if len(videos) == 1 and len(images) == 0:
+        return 1
+    if videos and len(mats) <= 2 and not images:
+        return 1
+    if images and not videos:
+        return max(3, min(_MAX_MATERIALS, len(images)))
     if videos and len(mats) <= 2:
         return max(2, min(4, len(mats) + 1))
     return max(3, min(_MAX_MATERIALS, len(mats)))

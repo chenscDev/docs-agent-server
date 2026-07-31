@@ -256,7 +256,7 @@ def _plan_with_llm(
         return None
 
     mats = normalize_materials(materials)
-    scene_n = target_scene_count(mats, default=4)
+    scene_n = target_scene_count(mats, default=4, generation_type=generation_type)
     total_sec = target_total_duration_sec(mats, prompt)
     per_sec = round(total_sec / max(1, scene_n), 1)
     requested = parse_requested_duration_sec(prompt)
@@ -367,7 +367,11 @@ def _plan_with_rules(
         beats = _split_beats(prompt)
         source_indices = [None] * len(beats)
 
-    want = target_scene_count(mats, default=min(5, max(3, len(beats))))
+    want = target_scene_count(
+        mats,
+        default=min(5, max(3, len(beats))),
+        generation_type=generation_type,
+    )
     # 镜头数对齐素材：不够则循环文案节拍
     while len(beats) < want:
         beats.append(beats[len(beats) % max(1, len(_split_beats(prompt)))][:40])
