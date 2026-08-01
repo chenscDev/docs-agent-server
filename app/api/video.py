@@ -131,6 +131,9 @@ class VideoHandoffBody(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=2000)
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId")
     source: str = Field(default="docs-agent")
+    title: str | None = Field(default=None, max_length=80)
+    summary: str | None = Field(default=None, max_length=280)
+    scene_hint: str | None = Field(default=None, alias="sceneHint", max_length=80)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -255,6 +258,9 @@ def post_video_handoff(
             knowledge_base_id=body.knowledge_base_id,
             source=body.source,
             token_key=_token_key_from_request(request),
+            title=body.title,
+            summary=body.summary,
+            scene_hint=body.scene_hint,
         )
     except ValueError as exc:
         raise_api_error(400, "HANDOFF_INVALID", str(exc)[:200])

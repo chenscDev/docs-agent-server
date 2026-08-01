@@ -35,6 +35,9 @@ def put_handoff(
     knowledge_base_id: str | None = None,
     source: str = "docs-agent",
     token_key: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+    scene_hint: str | None = None,
 ) -> dict[str, Any]:
     """写入交接草稿，返回公开字段。"""
     text = (prompt or "").strip()
@@ -42,11 +45,17 @@ def put_handoff(
         raise ValueError("prompt 不能为空")
     hid = new_id("vh")
     now = time.time()
+    title_v = (title or "").strip()[:80] or None
+    summary_v = (summary or "").strip()[:280] or None
+    scene_v = (scene_hint or "").strip()[:80] or None
     row = {
         "id": hid,
         "prompt": text[:2000],
         "knowledgeBaseId": (knowledge_base_id or "").strip() or None,
         "source": (source or "docs-agent").strip() or "docs-agent",
+        "title": title_v,
+        "summary": summary_v,
+        "sceneHint": scene_v,
         "createdAt": now,
         "expiresAt": now + _TTL_SEC,
     }
@@ -60,6 +69,9 @@ def put_handoff(
         "prompt": row["prompt"],
         "knowledgeBaseId": row["knowledgeBaseId"],
         "source": row["source"],
+        "title": row["title"],
+        "summary": row["summary"],
+        "sceneHint": row["sceneHint"],
         "expiresInSec": _TTL_SEC,
     }
 
@@ -90,4 +102,7 @@ def consume_handoff(
             "prompt": row["prompt"],
             "knowledgeBaseId": row.get("knowledgeBaseId"),
             "source": row.get("source") or "docs-agent",
+            "title": row.get("title"),
+            "summary": row.get("summary"),
+            "sceneHint": row.get("sceneHint"),
         }
