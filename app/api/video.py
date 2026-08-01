@@ -276,8 +276,13 @@ def post_consume_video_handoff(
 
 
 @router.post("/assets")
-async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
-    """上传分镜配图 / 短视频 / Logo，返回可公网访问 URL。"""
+async def upload_video_asset(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """上传分镜配图 / 短视频 / Logo，返回可公网访问 URL，并写入素材库。"""
+    from app.video.asset_library import asset_to_dict, register_asset
+
     data = await file.read()
     try:
         saved = save_uploaded_asset(
@@ -287,7 +292,105 @@ async def upload_video_asset(file: UploadFile = File(...)) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise_api_error(400, "ASSET_INVALID", str(exc))
+    try:
+        row = register_asset(
+            db,
+            url=saved["url"],
+            kind=saved.get("kind") or "image",
+            filename=saved.get("filename"),
+            project_id="inbox",
+            project_title="上传箱",
+            source_type="upload",
+            asset_id=saved.get("id"),
+        )
+        saved["libraryId"] = row.id
+        saved["projectId"] = row.project_id
+        _ = asset_to_dict(row)
+    except Exception as exc:  # noqa: BLE001
+        # 上传成功优先；索引失败不阻断创作
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning("register asset failed: %s", exc)
     return saved
+
+
+@router.get("/assets")
+def get_video_assets(
+    limit: int = 60,
+    project_id: str | None = None,
+    kind: str | None = None,
+    owner_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """素材库列表：历史上传与成片快照，可按项目筛选。"""
+    from app.video.asset_library import (
+        asset_to_dict,
+        list_asset_projects,
+        list_assets,
+    )
+
+    items = list_assets(
+        db,
+        limit=limit,
+        project_id=project_id,
+        owner_id=owner_id,
+        kind=kind,
+    )
+    return {
+        "items": [asset_to_dict(x) for x in items],
+        "projects": list_asset_projects(db, owner_id=owner_id),
+    }
+
+
+@router.delete("/assets/{asset_id}")
+def remove_video_asset(
+    asset_id: str,
+    remove_file: bool = False,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """从素材库移除索引（默认不删磁盘文件，避免成片引用失效）。"""
+    from app.video.asset_library import delete_asset
+
+    ok = delete_asset(db, asset_id, remove_file=bool(remove_file))
+    if not ok:
+        raise_api_error(404, "ASSET_NOT_FOUND", "素材不存在")
+    return {"ok": True, "id": asset_id}
+
+
+class ImportAssetsFromJobBody(BaseModel):
+    job_id: str = Field(..., alias="jobId", min_length=1, max_length=64)
+    include_materials: bool = Field(default=True, alias="includeMaterials")
+    include_scenes: bool = Field(default=True, alias="includeScenes")
+    include_cover: bool = Field(default=True, alias="includeCover")
+    include_output: bool = Field(default=False, alias="includeOutput")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+@router.post("/assets/from-job")
+def post_assets_from_job(
+    body: ImportAssetsFromJobBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """把成片任务的素材/分镜/封面快照进素材库（按任务分组）。"""
+    from app.video.asset_library import asset_to_dict, import_job_to_library
+
+    job = get_job(db, body.job_id)
+    if job is None:
+        raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    rows = import_job_to_library(
+        db,
+        job,
+        include_materials=bool(body.include_materials),
+        include_scenes=bool(body.include_scenes),
+        include_cover=bool(body.include_cover),
+        include_output=bool(body.include_output),
+    )
+    return {
+        "ok": True,
+        "count": len(rows),
+        "projectId": job.id,
+        "items": [asset_to_dict(x) for x in rows],
+    }
 
 
 @router.post("/materials/suggest-prompt")

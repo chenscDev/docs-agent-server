@@ -205,3 +205,34 @@ class VideoJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class VideoAsset(Base):
+    """视频素材库条目（历史上传 / 成片分镜快照）。"""
+
+    __tablename__ = "video_assets"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # image | video
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="image")
+    url: Mapped[str] = mapped_column(String(1024), nullable=False)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    caption: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # 项目分组：inbox=上传箱；或任务 id
+    project_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="inbox", index=True
+    )
+    project_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # upload | job_material | scene | cover | output
+    source_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="upload"
+    )
+    source_job_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    owner_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -166,6 +166,25 @@ def create_job(
     db.add(job)
     db.commit()
     db.refresh(job)
+    # 创作素材同步进素材库（上传箱），便于跨次复用
+    if mats:
+        try:
+            from app.video.asset_library import register_asset
+
+            for m in mats:
+                register_asset(
+                    db,
+                    url=m["url"],
+                    kind=m.get("kind") or "image",
+                    caption=m.get("caption"),
+                    project_id="inbox",
+                    project_title="上传箱",
+                    source_type="job_material",
+                    source_job_id=job.id,
+                    owner_id=owner,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sync materials to library failed: %s", exc)
     return job
 
 
@@ -195,6 +214,12 @@ def duplicate_job(db: Session, source: VideoJob) -> VideoJob:
         board = board.model_copy(
             update={"version": 1, "title": f"{board.title}（副本）"}
         )
+    mats = None
+    if source.materials_json:
+        try:
+            mats = json.loads(source.materials_json)
+        except json.JSONDecodeError:
+            mats = None
     child = create_job(
         db,
         prompt=source.prompt,
@@ -203,6 +228,7 @@ def duplicate_job(db: Session, source: VideoJob) -> VideoJob:
         parent_job_id=source.id,
         storyboard=board,
         owner_id=source.owner_id,
+        materials=mats if isinstance(mats, list) else None,
         generation_type=getattr(source, "generation_type", None),
         industry_preset_id=getattr(source, "industry_preset_id", None),
     )
