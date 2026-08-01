@@ -244,6 +244,41 @@ def patch_storyboard(
     return validate_storyboard(data)
 
 
+def compress_storyboard_duration(
+    storyboard: Storyboard,
+    *,
+    target_sec: float,
+) -> Storyboard:
+    """
+    按目标总时长等比缩放各镜 durationSec（夹在 1～15 秒）。
+    用于创作助手「压到约 Ns」快捷能力。
+    """
+    scenes = list(storyboard.scenes)
+    if not scenes:
+        return storyboard
+    target = max(3.0, min(float(target_sec), 90.0))
+    current = float(sum(s.durationSec for s in scenes)) or 1.0
+    ratio = target / current
+    next_scenes = []
+    for s in scenes:
+        dur = max(1.0, min(15.0, round(float(s.durationSec) * ratio, 1)))
+        next_scenes.append(s.model_copy(update={"durationSec": dur}))
+    # 微调末镜，使总和更接近目标
+    total = float(sum(s.durationSec for s in next_scenes))
+    delta = round(target - total, 1)
+    if abs(delta) >= 0.1:
+        last = next_scenes[-1]
+        next_scenes[-1] = last.model_copy(
+            update={
+                "durationSec": max(1.0, min(15.0, round(last.durationSec + delta, 1)))
+            }
+        )
+    data = storyboard.model_dump()
+    data["scenes"] = [s.model_dump() for s in next_scenes]
+    data["version"] = int(data.get("version") or 1) + 1
+    return validate_storyboard(data)
+
+
 def _plan_with_llm(
     prompt: str,
     *,

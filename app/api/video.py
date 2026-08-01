@@ -109,6 +109,8 @@ class CreativeAgentBody(BaseModel):
     template_id: TemplateId = Field(default="talking-captions", alias="templateId")
     storyboard: dict[str, Any] | None = None
     knowledge_hint: str = Field(default="", alias="knowledgeHint")
+    # 来源成片：submit_render 时写入 parent_job_id，便于片段复用
+    parent_job_id: str | None = Field(default=None, alias="parentJobId")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -788,6 +790,7 @@ def creative_stream(body: CreativeAgentBody) -> StreamingResponse:
             template_id=body.template_id,
             storyboard=body.storyboard,
             knowledge_hint=body.knowledge_hint,
+            parent_job_id=body.parent_job_id,
         )
 
     return StreamingResponse(gen(), media_type="text/event-stream")

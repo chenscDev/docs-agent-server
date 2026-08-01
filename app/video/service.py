@@ -895,6 +895,12 @@ def remix_job(
     if scene_id and instruction:
         board = refine_scene(board, scene_id=scene_id, instruction=instruction)
     prompt = (new_prompt or parent.prompt).strip()
+    mats = None
+    if parent.materials_json:
+        try:
+            mats = json.loads(parent.materials_json)
+        except json.JSONDecodeError:
+            mats = None
     child = create_job(
         db,
         prompt=prompt,
@@ -902,6 +908,10 @@ def remix_job(
         knowledge_base_id=parent.knowledge_base_id,
         parent_job_id=parent.id,
         storyboard=board,
+        materials=mats if isinstance(mats, list) else None,
+        generation_type=getattr(board, "generationType", None)
+        or getattr(parent, "generation_type", None),
+        industry_preset_id=getattr(parent, "industry_preset_id", None),
     )
     child.version = max(parent.version + 1, board.version)
     child.title = board.title
