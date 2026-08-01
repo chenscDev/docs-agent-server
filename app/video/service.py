@@ -449,30 +449,17 @@ def apply_knowledge_sources(
     board: Storyboard, refs: list[dict[str, Any]]
 ) -> Storyboard:
     """
-    强制给每个镜头打上来源标签。
+    知识库绑定：打标 + 引用短句写入口播 + 禁词清洗。
 
     - 若 LLM 已写 sourceIndex，按编号映射；
     - 否则按镜头顺序轮转分配引用。
     """
     if not refs:
         return board
-    by_idx = {int(r["index"]): r for r in refs if r.get("index")}
-    data = board.model_dump()
-    for i, sc in enumerate(data.get("scenes") or []):
-        raw_idx = sc.get("sourceIndex")
-        ref = None
-        if raw_idx is not None:
-            try:
-                ref = by_idx.get(int(raw_idx))
-            except (TypeError, ValueError):
-                ref = None
-        if ref is None:
-            ref = refs[i % len(refs)]
-        sc["sourceIndex"] = int(ref["index"])
-        sc["sourceChunkId"] = str(ref.get("chunkId") or "")
-        title = str(ref.get("documentTitle") or "知识库")
-        sc["sourceLabel"] = f"[{ref['index']}] {title}"[:120]
-    return validate_storyboard(data)
+    from app.video.knowledge_bind import bind_knowledge_to_storyboard
+
+    next_board, _warnings = bind_knowledge_to_storyboard(board, refs)
+    return next_board
 
 
 def delete_job(db: Session, job_id: str) -> bool:

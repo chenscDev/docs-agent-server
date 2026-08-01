@@ -36,6 +36,8 @@ class Scene(BaseModel):
     sourceChunkId: str = Field("", max_length=64)
     # 展示用来源标签，如「[1] 品牌手册」
     sourceLabel: str = Field("", max_length=120)
+    # 写入口播的引用短句（便于端上展示「引用」）
+    sourceSnippet: str = Field("", max_length=120)
 
 
 class Storyboard(BaseModel):
@@ -68,6 +70,8 @@ class Storyboard(BaseModel):
     ttsVoice: str = Field("longxiaochun_v2", max_length=64)
     # 是否合成 TTS 口播（纯画面剪辑为 False）
     ttsEnabled: bool = True
+    # 合规警告（禁词改写等，仅展示不参与渲染）
+    complianceWarnings: list[str] = Field(default_factory=list)
 
     @field_validator("scenes")
     @classmethod

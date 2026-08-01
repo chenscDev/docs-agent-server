@@ -146,6 +146,7 @@ def iter_creative_plan_sse(
     generation_type: str | None = None,
     brand_notes: str = "",
     knowledge_hint: str = "",
+    knowledge_refs: list[dict[str, Any]] | None = None,
     materials: list[dict[str, Any]] | None = None,
     auto_understand_materials: bool = True,
 ) -> Iterator[str]:
@@ -162,6 +163,7 @@ def iter_creative_plan_sse(
     seq = 0
     cancel_ev = register(stream_id, stream_id)
     settings = get_settings()
+    kb_refs = list(knowledge_refs or [])
 
     def emit(event_type: str, payload: dict[str, Any]) -> str:
         nonlocal seq
@@ -287,7 +289,7 @@ def iter_creative_plan_sse(
                 knowledge_hint=knowledge_hint,
                 materials=mats,
             )
-            refs = refs_from_knowledge_hint(knowledge_hint)
+            refs = kb_refs or refs_from_knowledge_hint(knowledge_hint)
             if refs:
                 final = apply_knowledge_sources(final, refs)
 
@@ -295,11 +297,13 @@ def iter_creative_plan_sse(
             yield emit("cancelled", {"message": "已取消"})
             return
 
+        warnings = list(getattr(final, "complianceWarnings", None) or [])
         yield emit(
             "storyboard",
             {
                 "storyboard": final.to_public_dict(),
                 "materials": mats,
+                "complianceWarnings": warnings,
                 "progress": 0.9,
             },
         )
@@ -308,6 +312,7 @@ def iter_creative_plan_sse(
             {
                 "storyboard": final.to_public_dict(),
                 "materials": mats,
+                "complianceWarnings": warnings,
                 "progress": 1.0,
                 "streamId": stream_id,
             },

@@ -755,15 +755,20 @@ async def job_events(job_id: str, db: Session = Depends(get_db)) -> StreamingRes
 @router.post("/plan/stream")
 def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingResponse:
     """流式分镜规划（不落库；确认后再 POST /jobs）。"""
-    from app.video.service import resolve_knowledge_hint
+    from app.video.service import (
+        format_knowledge_hint,
+        resolve_knowledge_refs,
+    )
 
     hint = (body.knowledge_hint or "").strip()
     kb_ids = normalize_knowledge_base_ids(
         body.knowledge_base_id,
         body.knowledge_base_ids,
     )
-    if not hint and kb_ids:
-        hint = resolve_knowledge_hint(db, kb_ids)
+    # 带真实 chunkId 的引用，便于写入口播与端上溯源
+    kb_refs = resolve_knowledge_refs(db, kb_ids) if kb_ids else []
+    if not hint and kb_refs:
+        hint = format_knowledge_hint(kb_refs)
 
     def gen() -> Iterator[str]:
         yield from iter_creative_plan_sse(
@@ -772,6 +777,7 @@ def plan_stream(body: PlanBody, db: Session = Depends(get_db)) -> StreamingRespo
             generation_type=body.generation_type,
             brand_notes=body.brand_notes,
             knowledge_hint=hint,
+            knowledge_refs=kb_refs,
             materials=[m.model_dump() for m in (body.materials or [])],
             auto_understand_materials=bool(body.auto_understand_materials),
         )
