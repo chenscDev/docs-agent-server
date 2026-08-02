@@ -198,7 +198,11 @@ def list_jobs(
     stmt = select(VideoJob).order_by(VideoJob.created_at.desc())
     status_norm = (status or "").strip().lower()
     if status_norm and status_norm != "all":
-        stmt = stmt.where(VideoJob.status == status_norm)
+        # published：按作品库标记筛选（非任务流水线 status）
+        if status_norm == "published":
+            stmt = stmt.where(VideoJob.publish_status == "published")
+        else:
+            stmt = stmt.where(VideoJob.status == status_norm)
     owner = (owner_id or "").strip()
     if owner:
         stmt = stmt.where(VideoJob.owner_id == owner)

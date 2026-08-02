@@ -134,6 +134,11 @@ class VideoHandoffBody(BaseModel):
     title: str | None = Field(default=None, max_length=80)
     summary: str | None = Field(default=None, max_length=280)
     scene_hint: str | None = Field(default=None, alias="sceneHint", max_length=80)
+    generation_type: str | None = Field(
+        default="visual-cut",
+        alias="generationType",
+        max_length=40,
+    )
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -261,6 +266,7 @@ def post_video_handoff(
             title=body.title,
             summary=body.summary,
             scene_hint=body.scene_hint,
+            generation_type=body.generation_type,
         )
     except ValueError as exc:
         raise_api_error(400, "HANDOFF_INVALID", str(exc)[:200])

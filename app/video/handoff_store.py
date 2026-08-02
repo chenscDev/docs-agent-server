@@ -38,6 +38,7 @@ def put_handoff(
     title: str | None = None,
     summary: str | None = None,
     scene_hint: str | None = None,
+    generation_type: str | None = None,
 ) -> dict[str, Any]:
     """写入交接草稿，返回公开字段。"""
     text = (prompt or "").strip()
@@ -48,6 +49,7 @@ def put_handoff(
     title_v = (title or "").strip()[:80] or None
     summary_v = (summary or "").strip()[:280] or None
     scene_v = (scene_hint or "").strip()[:80] or None
+    gen_v = (generation_type or "visual-cut").strip()[:40] or "visual-cut"
     row = {
         "id": hid,
         "prompt": text[:2000],
@@ -56,6 +58,7 @@ def put_handoff(
         "title": title_v,
         "summary": summary_v,
         "sceneHint": scene_v,
+        "generationType": gen_v,
         "createdAt": now,
         "expiresAt": now + _TTL_SEC,
     }
@@ -72,6 +75,7 @@ def put_handoff(
         "title": row["title"],
         "summary": row["summary"],
         "sceneHint": row["sceneHint"],
+        "generationType": row["generationType"],
         "expiresInSec": _TTL_SEC,
     }
 
@@ -105,4 +109,5 @@ def consume_handoff(
             "title": row.get("title"),
             "summary": row.get("summary"),
             "sceneHint": row.get("sceneHint"),
+            "generationType": row.get("generationType") or "visual-cut",
         }
