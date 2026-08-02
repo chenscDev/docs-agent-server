@@ -42,6 +42,22 @@ def enqueue_video_job(job_id: str) -> bool:
     return True
 
 
+def requeue_video_job(job_id: str) -> bool:
+    """
+    明确重试入队：先从队列集合摘掉再 enqueue，避免「状态已重置但 enqueue 返回 False」假成功。
+    """
+    job_id = (job_id or "").strip()
+    if not job_id:
+        return False
+    with _lock:
+        _queued_or_running.discard(job_id)
+        try:
+            _queue_order.remove(job_id)
+        except ValueError:
+            pass
+    return enqueue_video_job(job_id)
+
+
 def get_queue_info(job_id: str) -> dict[str, int | str]:
     """返回排队位次（1 起算）、前方人数、预计等待秒。"""
     jid = (job_id or "").strip()

@@ -23,7 +23,7 @@ from app.video.assets import save_uploaded_asset
 from app.video.bgm_catalog import list_bgm_tracks, save_custom_bgm
 from app.video.creative_agent import iter_creative_agent_sse, iter_creative_plan_sse
 from app.video.events import format_sse, make_video_event
-from app.video.render_queue import enqueue_video_job
+from app.video.render_queue import enqueue_video_job, requeue_video_job
 from app.video.industry_presets import (
     list_industries,
     list_industry_presets,
@@ -516,8 +516,18 @@ def start_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
         raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
     if job.status in ("ready", "cancelled"):
         raise_api_error(409, "VIDEO_JOB_DONE", f"任务已结束: {job.status}")
-    enqueue_video_job(job.id)
-    return job_to_dict(job)
+    enqueued = enqueue_video_job(job.id)
+    db.refresh(job)
+    # 已在队列中时 enqueue 返回 False，属幂等成功；真正未入队且仍 pending 才报错
+    if not enqueued and job.status == "pending":
+        # 可能已在 _queued_or_running：仍返回当前任务，附带说明
+        data = job_to_dict(job)
+        data["enqueued"] = False
+        data["alreadyQueued"] = True
+        return data
+    data = job_to_dict(job)
+    data["enqueued"] = bool(enqueued)
+    return data
 
 
 @router.post("/jobs/{job_id}/retry")
@@ -525,6 +535,14 @@ def retry_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     job = get_job(db, job_id)
     if job is None:
         raise_api_error(404, "VIDEO_JOB_NOT_FOUND", "视频任务不存在")
+    # 仅失败 / 已取消可重试，避免对 ready / 进行中任务误重置
+    if job.status not in ("failed", "cancelled"):
+        raise_api_error(
+            409,
+            "VIDEO_JOB_NOT_RETRYABLE",
+            f"当前状态不可重试: {job.status}",
+            retryable=False,
+        )
     job.status = "pending"
     job.cancel_requested = 0
     job.error_code = None
@@ -533,9 +551,18 @@ def retry_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     job.stage_message = "重试排队中"
     # 保留分镜：仅重新渲染；无分镜则整条 pipeline
     db.commit()
-    enqueue_video_job(job.id)
+    enqueued = requeue_video_job(job.id)
     db.refresh(job)
-    return job_to_dict(job)
+    if not enqueued:
+        raise_api_error(
+            500,
+            "VIDEO_ENQUEUE_FAILED",
+            "重新入队失败，请稍后重试",
+            retryable=True,
+        )
+    data = job_to_dict(job)
+    data["enqueued"] = True
+    return data
 
 
 @router.post("/jobs/{job_id}/duplicate")
