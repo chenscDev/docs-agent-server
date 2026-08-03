@@ -214,13 +214,20 @@ def apply_generation_type_defaults(
     data: dict[str, Any],
     generation_type: str | None = None,
 ) -> dict[str, Any]:
-    """按生成类型补齐 templateId / ttsEnabled / 默认 BGM。"""
-    out = dict(data or {})
+    """按生成类型补齐 templateId / ttsEnabled / 默认 BGM。
+
+    若调用方已显式传入 templateId / ttsEnabled，则保留，避免创作助手改模板被盖掉。
+    """
+    src = dict(data or {})
+    out = dict(src)
     gtid = generation_type or out.get("generationType") or "visual-cut"
     meta = resolve_generation_type(str(gtid))
     out["generationType"] = meta["id"]
-    out["templateId"] = meta["defaultTemplateId"]
-    out["ttsEnabled"] = bool(meta.get("ttsEnabled", True))
+    had_template = bool(str(src.get("templateId") or "").strip())
+    if not had_template:
+        out["templateId"] = meta["defaultTemplateId"]
+    if "ttsEnabled" not in src or src.get("ttsEnabled") is None:
+        out["ttsEnabled"] = bool(meta.get("ttsEnabled", True))
     if not out.get("bgmTrackId"):
         out["bgmTrackId"] = meta.get("defaultBgmTrackId") or "soft-pink"
     # 纯画面默认开配乐
